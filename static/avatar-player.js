@@ -3,227 +3,12 @@ import { createVoiceChat } from "/static/voice-chat.js?v=2";
 
 
 /**
- * Photoreal Jeff: your real center photo on screen; each reply is InfiniteTalk video when the server generates it,
- * otherwise still photo + your cloned voice (no synthetic puppet mouth).
- * @param {HTMLElement} stageEl
- * @param {object} profile
- * @returns {() => void}
- */
-function mountPhotorealPlayer(stageEl, profile, hooks = {}) {
-  const name = profile.display_name || profile.canonical_name || "Avatar";
-  const portrait = profile.avatar_face_url || profile.scan_frames?.[0]?.url || "";
-  const videoOn = Boolean(profile.avatar_video_enabled);
-  const motionNote = videoOn
-    ? "InfiniteTalk video is on — replies should play as moving clips (slow to render)."
-    : "The portrait stays still while you hear your cloned voice — mouth does not move on purpose. Enable server env AVATAR_PHOTOREAL_VIDEO=1 for moving face, or try the 3D room.";
-
-  stageEl.innerHTML = `
-    <div class="avatar-figure photoreal has-face" id="avatar">
-      <img class="avatar-idle" id="avatar-idle" src="${escapeAttr(portrait)}" alt="" />
-      <video class="avatar-video" id="avatar-video" playsinline preload="auto"></video>
-    </div>
-    <h2>${escapeHtml(name)}</h2>
-    <p id="avatar-status" class="avatar-note muted">${escapeHtml(motionNote)}</p>
-    <div class="chat-meter" title="Your microphone level"><div class="chat-meter-bar" id="chat-meter-bar"></div><div class="chat-meter-thr" id="chat-meter-thr"></div></div>
-    <div class="chat-log" id="chat-log" aria-live="polite"></div>
-    <form class="chat-type" id="chat-type" autocomplete="off">
-      <input id="chat-input" type="text" placeholder="…or type a message" />
-      <button type="submit" class="btn-ghost">Send</button>
-    </form>
-    <div class="avatar-actions btn-row" style="justify-content: center; flex-wrap: wrap; gap: 0.5rem;">
-      <button type="button" class="btn-primary" id="chat-mute" disabled>Mute mic</button>
-      <button type="button" class="btn-primary" id="try-live">Animated face (lip sync)</button>
-      <button type="button" class="btn-ghost" id="try-interactive">Walk &amp; dance (prototype)</button>
-      <button type="button" class="btn-ghost" id="preview-talk-video">Preview talking video</button>
-      <button type="button" class="btn-ghost" id="back-profile">Back to profile</button>
-    </div>
-    <p class="avatar-note muted" style="font-size:.8rem;margin-top:.5rem">
-      Games and object interaction need a full 3D world + rig — the prototype room is the first step. Legacy mesh: <code>AVATAR_RENDER=puppet</code>.
-    </p>
-  `;
-
-  const idle = stageEl.querySelector("#avatar-idle");
-  const video = stageEl.querySelector("#avatar-video");
-  const statusEl = stageEl.querySelector("#avatar-status");
-  const muteBtn = stageEl.querySelector("#chat-mute");
-  const logEl = stageEl.querySelector("#chat-log");
-  const meterBar = stageEl.querySelector("#chat-meter-bar");
-  const meterThr = stageEl.querySelector("#chat-meter-thr");
-  let chat = null;
-  let destroyed = false;
-  const audio = new Audio();
-
-  async function playClip(blob, videoUrl = "") {
-    if (destroyed) return;
-    if (videoUrl) {
-      statusEl.textContent = "Speaking (video)…";
-      idle.style.opacity = "0";
-      video.style.display = "block";
-      video.src = videoUrl;
-      await new Promise((resolve) => {
-        const done = () => {
-          video.removeEventListener("ended", done);
-          video.removeEventListener("error", done);
-          resolve();
-        };
-        video.addEventListener("ended", done);
-        video.addEventListener("error", done);
-        video.play().catch(() => {
-          statusEl.textContent = "Could not play video — click the page once, then try again.";
-          done();
-        });
-      });
-      video.style.display = "none";
-      idle.style.opacity = "1";
-      video.removeAttribute("src");
-      video.load();
-      return;
-    }
-    statusEl.textContent = "Speaking (audio only — face stays still until Comfy video is enabled)…";
-    audio.src = URL.createObjectURL(blob);
-    await new Promise((resolve) => {
-      const done = () => {
-        audio.removeEventListener("ended", done);
-        audio.removeEventListener("error", done);
-        resolve();
-      };
-      audio.addEventListener("ended", done);
-      audio.addEventListener("error", done);
-      audio.play().catch((err) => {
-        statusEl.textContent = `Could not play audio (${err?.name || "error"}) — allow sound, then reload.`;
-        done();
-      });
-    });
-    URL.revokeObjectURL(audio.src);
-  }
-
-  function addLine(who, text) {
-    const row = document.createElement("p");
-    row.className = `chat-line ${who}`;
-    row.textContent = (who === "you" ? "You: " : `${name}: `) + text;
-    logEl.appendChild(row);
-    logEl.scrollTop = logEl.scrollHeight;
-  }
-
-  let chatBrainFoot = "";
-
-  async function startChat() {
-    statusEl.textContent = "Loading the voice and speech models (the first time takes a minute)…";
-    try {
-      const r = await fetch("/api/chat/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ canonical_name: profile.canonical_name }),
-      });
-      const j = await r.json();
-      if (j.status !== "ok") throw new Error(j.message || "chat could not start");
-      if (destroyed) return;
-      chatBrainFoot =
-        j.llm_model && j.llm_mode ? ` (brain: ${j.llm_model}, ${j.llm_mode})` : "";
-      chat = createVoiceChat({
-        name: profile.canonical_name,
-        token: j.token,
-        playClip,
-        onSuperseded: () => {
-          audio.pause();
-          video.pause();
-          statusEl.textContent = "Chat moved to another window — close extra avatar tabs, then reload.";
-          muteBtn.disabled = true;
-        },
-        onStatus: (t) => {
-          if (destroyed) return;
-          statusEl.textContent = t + chatBrainFoot;
-        },
-        onLevel: (v, thr) => {
-          meterBar.style.width = `${Math.min(100, v * 600)}%`;
-          meterThr.style.left = `${Math.min(100, thr * 600)}%`;
-        },
-        onLine: addLine,
-      });
-      await chat.start();
-      muteBtn.disabled = false;
-      await chat.say(`Hello, I'm ${j.display_name || name}.`);
-    } catch (e) {
-      console.error(e);
-      statusEl.textContent =
-        e?.name === "NotAllowedError" || e?.name === "NotFoundError"
-          ? "I can't use the microphone — allow it in the browser's address bar, then reload."
-          : `Chat problem: ${e.message || e}`;
-    }
-  }
-
-  muteBtn?.addEventListener("click", () => {
-    if (!chat) return;
-    chat.setMuted(!chat.muted);
-    muteBtn.textContent = chat.muted ? "Unmute mic" : "Mute mic";
-  });
-  stageEl.querySelector("#chat-type")?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const input = stageEl.querySelector("#chat-input");
-    const t = input.value.trim();
-    if (t && chat) {
-      input.value = "";
-      void chat.sendText(t);
-    }
-  });
-  stageEl.querySelector("#try-live")?.addEventListener("click", () => hooks.goLive?.());
-  stageEl.querySelector("#try-interactive")?.addEventListener("click", () => hooks.goInteractive?.());
-  stageEl.querySelector("#preview-talk-video")?.addEventListener("click", async () => {
-    const url = "/samples/talk_jeff.mp4";
-    try {
-      const ok = await fetch(url, { method: "HEAD" }).then((r) => r.ok);
-      if (!ok) throw new Error("missing");
-      await playClip(new Blob(), url);
-    } catch {
-      statusEl.textContent = "No sample at /samples/talk_jeff.mp4 — run ml/comfy_run on your voice line first.";
-    }
-  });
-  stageEl.querySelector("#back-profile")?.addEventListener("click", () => hooks.onBackProfile?.());
-
-  void startChat();
-
-  return () => {
-    destroyed = true;
-    audio.pause();
-    video.pause();
-    chat?.stop();
-  };
-}
-
-/**
  * @param {HTMLElement} stageEl .avatar-stage
  * @param {object} profile profile_summary from API
  * @returns {() => void} teardown
  */
 export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
-  let teardown = () => {};
-  const goPortrait = () => {
-    teardown();
-    teardown = mountPhotorealPlayer(stageEl, profile, { ...hooks, goInteractive, goLive });
-  };
-  const goInteractive = async () => {
-    teardown();
-    const { mountInteractivePlayer } = await import("/static/avatar-interactive.js?v=1");
-    teardown = mountInteractivePlayer(stageEl, profile, {
-      onPortrait: goPortrait,
-      onBackProfile: hooks.onBackProfile,
-    });
-  };
-  const goLive = () => {
-    teardown();
-    teardown = mountLiveAnimatedPlayer(stageEl, profile, { ...hooks, goPortrait, goInteractive });
-  };
-  const mode = profile.avatar_render || "live";
-  if (mode === "photoreal") {
-    goPortrait();
-    return () => teardown();
-  }
-  if (mode === "interactive") {
-    void goInteractive();
-    return () => teardown();
-  }
-  goLive();
-  return () => teardown();
+  return mountLiveAnimatedPlayer(stageEl, profile, hooks);
 }
 
 /** Real-time mouth, blink, and head motion driven by voice (3D stitched skin when available). */
@@ -250,10 +35,6 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
       <button type="button" class="btn-ghost" id="back-profile">Back to profile</button>
     </div>
     <label class="avatar-opt" style="display:block;margin-top:.6rem;font-size:.85rem;opacity:.75;"><input type="checkbox" id="use-3d"> Try 3D stitched skin (experimental — 2D warp is default)</label>
-    <div class="avatar-actions btn-row" style="justify-content:center;flex-wrap:wrap;gap:.5rem;margin-top:.5rem">
-      <button type="button" class="btn-ghost" id="try-portrait">Still portrait mode</button>
-      <button type="button" class="btn-ghost" id="try-interactive-live">Walk &amp; dance (prototype)</button>
-    </div>
   `;
 
   const audio = stageEl.querySelector("#avatar-audio");
@@ -535,8 +316,6 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
     location.reload(); // the avatar is rebuilt with the chosen head
   });
   stageEl.querySelector("#back-profile")?.addEventListener("click", () => hooks.onBackProfile?.());
-  stageEl.querySelector("#try-portrait")?.addEventListener("click", () => hooks.goPortrait?.());
-  stageEl.querySelector("#try-interactive-live")?.addEventListener("click", () => hooks.goInteractive?.());
 
   muteBtn?.addEventListener("click", () => {
     if (!chat) return;
