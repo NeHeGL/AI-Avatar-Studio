@@ -113,7 +113,7 @@ def _ollama_stream(system: str, history: list[dict]):
             "messages": msgs,
             "stream": True,
             "keep_alive": "30m",
-            "options": {"temperature": LLM_TEMPERATURE, "num_predict": LLM_NUM_PREDICT, "repeat_penalty": 1.15, "repeat_last_n": 256},
+            "options": {"temperature": LLM_TEMPERATURE, "num_predict": LLM_NUM_PREDICT},
         }).encode(),
     )
     with urllib.request.urlopen(req, timeout=300) as r:
