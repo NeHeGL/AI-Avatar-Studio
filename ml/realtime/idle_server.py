@@ -112,6 +112,36 @@ class Avatar:
         return paste_back(crop, self.crop_info["M_c2o"], self.src_rgb, self.mask)
 
 
+MATTE_MODEL = HERE / "models" / "u2net_human_seg.onnx"
+
+
+def make_matte(photo: Path, out: Path) -> bool:
+    """Cut the person out of the prepared photo: writes a white PNG whose alpha is the person (hair included).
+    Runs a small segmentation model locally (onnxruntime); the page uses it to swap the background."""
+    if out.exists() and out.stat().st_mtime >= photo.stat().st_mtime:
+        return True
+    if not MATTE_MODEL.exists():
+        return False
+    import onnxruntime as ort
+
+    img = cv2.imread(str(photo))
+    h, w = img.shape[:2]
+    sess = ort.InferenceSession(str(MATTE_MODEL), providers=["CPUExecutionProvider"])
+    x = cv2.resize(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), (320, 320), interpolation=cv2.INTER_AREA).astype(np.float32)
+    x = x / max(float(x.max()), 1e-6)
+    x = (x - np.array([0.485, 0.456, 0.406], np.float32)) / np.array([0.229, 0.224, 0.225], np.float32)
+    y = sess.run(None, {sess.get_inputs()[0].name: x.transpose(2, 0, 1)[None].astype(np.float32)})[0][0, 0]
+    y = (y - y.min()) / max(float(y.max() - y.min()), 1e-6)
+    m = cv2.resize(y, (w, h), interpolation=cv2.INTER_CUBIC)
+    m = np.clip((m - 0.35) / 0.4, 0.0, 1.0)  # firm edge, soft transition
+    m = cv2.erode(m, np.ones((3, 3), np.uint8))  # keep the old background from showing as a halo
+    m = cv2.GaussianBlur(m, (0, 0), max(1.0, w / 400))
+    rgba = np.dstack([np.full((h, w, 3), 255, np.uint8), (m * 255).astype(np.uint8)])
+    cv2.imwrite(str(out), rgba)
+    print(f"matte written: {out.name}", flush=True)
+    return True
+
+
 def smooth(x: float) -> float:
     x = min(max(x, 0.0), 1.0)
     return x * x * (3 - 2 * x)
@@ -288,6 +318,10 @@ def main():
         t = time.time()
         photo = ROOT / "data" / "media" / user / "cinematic" / "source.jpg"
         state["avatar"] = Avatar(photo, pipe)
+        try:
+            make_matte(photo, photo.with_name("matte.png"))
+        except Exception as e:  # the avatar works fine without a cut-out
+            print("matte failed:", e, flush=True)
         state["user"] = user
         return time.time() - t
 

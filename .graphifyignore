@@ -29,3 +29,6 @@ backups_2026-11-17/
 *.mp4
 *.task
 *.wasm
+
+*.onnx
+ml/realtime/models/

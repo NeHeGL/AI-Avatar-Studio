@@ -7,3 +7,5 @@ __pycache__/
 *.pyc
 graphify-out/cache/
 data/media/
+
+ml/realtime/models/

@@ -57,11 +57,127 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   if (!figure) return null;
   figure.style.position = "relative";
 
+  // Everything that moves lives in `fg`. When a cut-out of the person exists, `fg` is masked to it and a background sits behind,
+  // so the background can be replaced (or blurred) without touching the animation.
+  const bg = document.createElement("div");
+  bg.style.cssText = "position:absolute;inset:0;border-radius:inherit;z-index:0;pointer-events:none;";
+  figure.appendChild(bg);
+  const fg = document.createElement("div");
+  fg.style.cssText = "position:absolute;inset:0;border-radius:inherit;z-index:1;overflow:hidden;";
+  figure.appendChild(fg);
+  const matteUrl = `${base}/cinematic/matte.png`;
+  const sourceUrl = `${base}/cinematic/source.jpg`;
+  const BG_KEY = `avatar-bg-${base.split("/").pop()}`;
+  let matteReady = false;
+  const BACKGROUNDS = {
+    original: { label: "Original" },
+    blur: { label: "Blurred", css: `url(${sourceUrl})`, filter: "blur(18px) brightness(.85)" },
+    studio: { label: "Studio", css: "radial-gradient(ellipse at 50% 35%, #3b4252 0%, #1b1f2a 70%)" },
+    sky: { label: "Sky", css: "linear-gradient(180deg, #9fd0ff 0%, #e8f3ff 100%)" },
+    warm: { label: "Warm", css: "linear-gradient(160deg, #f6d5a8 0%, #c98b5e 100%)" },
+    green: { label: "Green", css: "#1f6f4a" },
+  };
+  function applyBackground(key) {
+    let choice = BACKGROUNDS[key];
+    if (key === "custom") {
+      let image = "";
+      try {
+        image = localStorage.getItem(`${BG_KEY}-img`) || "";
+      } catch {
+        /* ignore */
+      }
+      choice = image ? { css: `url(${image})` } : BACKGROUNDS.original;
+    }
+    const on = Boolean(matteReady && choice && choice.css);
+    fg.style.webkitMaskImage = fg.style.maskImage = on ? `url(${matteUrl})` : "none";
+    fg.style.webkitMaskSize = fg.style.maskSize = "100% 100%";
+    bg.style.background = on ? choice.css : "none";
+    bg.style.backgroundSize = "cover";
+    bg.style.backgroundPosition = "center";
+    bg.style.filter = on && choice.filter ? choice.filter : "none";
+    bg.style.transform = on && choice.filter ? "scale(1.08)" : "none";
+    try {
+      localStorage.setItem(BG_KEY, key);
+    } catch {
+      /* ignore */
+    }
+  }
+  let bgKey = "original";
+  try {
+    bgKey = localStorage.getItem(BG_KEY) || "original";
+  } catch {
+    /* ignore */
+  }
+  let matteTries = 0;
+  let matteTimer = 0;
+  let disposed = false;
+  let pickerEl = null;
+  // the cut-out is made by the live-face service the first time it sees a person; look for it until it shows up
+  const lookForMatte = () => {
+    const probe = new Image();
+    probe.onload = () => {
+      matteReady = true;
+      applyBackground(bgKey);
+      mountPicker();
+    };
+    probe.onerror = () => {
+      if (++matteTries < 40 && !disposed) matteTimer = setTimeout(lookForMatte, 2500);
+    };
+    probe.src = `${matteUrl}?t=${Date.now()}`;
+  };
+  function mountPicker() {
+    if (pickerEl || disposed) return;
+    pickerEl = document.createElement("div");
+    pickerEl.style.cssText = "display:flex;flex-wrap:wrap;gap:.4rem;justify-content:center;margin:.2rem 0 .6rem;align-items:center;";
+    const mk = (key, label) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn-ghost";
+      b.textContent = label;
+      b.style.cssText = "padding:.2rem .6rem;font-size:.8rem;";
+      b.addEventListener("click", () => {
+        bgKey = key;
+        applyBackground(key);
+      });
+      return b;
+    };
+    for (const [k, v] of Object.entries(BACKGROUNDS)) pickerEl.appendChild(mk(k, v.label));
+    const file = document.createElement("input");
+    file.type = "file";
+    file.accept = "image/*";
+    file.style.display = "none";
+    file.addEventListener("change", () => {
+      const f = file.files && file.files[0];
+      if (!f) return;
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement("canvas");
+        const k = Math.min(1, 900 / Math.max(img.width, img.height));
+        c.width = Math.round(img.width * k);
+        c.height = Math.round(img.height * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        try {
+          localStorage.setItem(`${BG_KEY}-img`, c.toDataURL("image/jpeg", 0.85)); // stays in this browser only
+        } catch {
+          /* too big: just use it this session */
+        }
+        bgKey = "custom";
+        applyBackground("custom");
+      };
+      img.src = URL.createObjectURL(f);
+    });
+    const pick = mk("pick", "Your image…");
+    pick.onclick = () => file.click();
+    pickerEl.append(pick, file);
+    figure.insertAdjacentElement("afterend", pickerEl);
+  }
+  lookForMatte();
+
   // Base layer: the same prepared photo every clip and reply is made from, so size and framing always match.
   const baseStill = new Image();
   baseStill.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;z-index:0;pointer-events:none;";
   baseStill.src = `${base}/cinematic/source.jpg`;
-  figure.appendChild(baseStill);
+  fg.appendChild(baseStill);
   const rawStill = stageEl.querySelector("#avatar-still");
   if (rawStill) rawStill.style.display = "none";
 
@@ -72,7 +188,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     v.preload = "auto";
     v.style.cssText =
       "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;opacity:0;pointer-events:none;transition:opacity .2s ease;";
-    figure.appendChild(v);
+    fg.appendChild(v);
     return v;
   };
   const layers = [makeVideo(), makeVideo()];
@@ -101,7 +217,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     const img = new Image();
     img.style.cssText =
       "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;z-index:0;opacity:0;transition:opacity .45s ease;pointer-events:none;";
-    figure.appendChild(img);
+    fg.appendChild(img);
     idleImg = img;
     // Pull the newest frame again and again (a live stream is flaky in some browsers).
     let alive = true;
@@ -285,6 +401,11 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
       return idleOk;
     },
     dispose() {
+      disposed = true;
+      clearTimeout(matteTimer);
+      pickerEl?.remove();
+      bg.remove();
+      fg.remove();
       clearTimeout(fadeTimer);
       clearInterval(idlePoll);
       stopFrames();
