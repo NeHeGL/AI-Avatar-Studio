@@ -219,9 +219,10 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
           clearTimeout(fadeTimer);
           // hold the last frame for a moment, tell the live face what it looks like, then fade across to it
           fadeTimer = setTimeout(async () => {
-            await seedFromFront();
-            release();
-          }, 500);
+            const ok = await seedFromFront();
+            if (ok) await new Promise((r) => setTimeout(r, 160)); // let the live face render its first matching frames
+            release(ok);
+          }, 400);
         }
         resolve(ok);
       };
@@ -261,9 +262,9 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   }
 
   /** Hide the photo layer (used when the animated face has to speak because no video was available). */
-  function release() {
+  function release(matched = false) {
     for (const v of layers) {
-      v.style.transition = "opacity .3s ease";
+      v.style.transition = matched ? "opacity .06s linear" : "opacity .3s ease"; // a match is a cut: nothing to blend
       v.style.opacity = "0";
     }
     front = -1;

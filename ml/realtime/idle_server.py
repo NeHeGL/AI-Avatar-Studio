@@ -122,6 +122,45 @@ def bump(x: float) -> float:
     return math.sin(math.pi * min(max(x, 0.0), 1.0)) ** 2
 
 
+class Gesture:
+    """A freshly invented bit of body language: a few random poses strung together with smooth moves.
+    It starts and ends at the rest pose, so it always hands back to the idle loop (and to the talking video) on the same frame."""
+
+    def __init__(self, rnd: random.Random, now: float):
+        self.t0 = now
+        kind = rnd.choice(["look_around", "think", "tilt", "sigh", "double_take", "ponder", "curious"])
+        sgn = rnd.choice([-1, 1])
+        A = lambda lo, hi: rnd.uniform(lo, hi)  # noqa: E731
+        # keyframes: (seconds, yaw, pitch, roll, squint 0..1, mouth 0..1)
+        if kind == "look_around":
+            k = [(0, 0, 0, 0, 0, 0), (A(.7, 1.0), sgn * A(5, 9), A(-1, 1), sgn * A(.5, 1.5), 0, 0), (A(1.6, 2.4), -sgn * A(3, 6), A(-1, 1), -sgn * A(.3, 1), 0, 0), (A(3.0, 3.8), 0, 0, 0, 0, 0)]
+        elif kind == "think":
+            k = [(0, 0, 0, 0, 0, 0), (A(.8, 1.2), sgn * A(4, 7), A(2.5, 5), sgn * A(1, 3), A(.1, .3), 0), (A(2.4, 3.4), sgn * A(3, 6), A(2, 4), sgn * A(1, 2.5), A(.1, .25), 0), (A(3.8, 4.6), 0, 0, 0, 0, 0)]
+        elif kind == "tilt":
+            k = [(0, 0, 0, 0, 0, 0), (A(.8, 1.3), sgn * A(1, 3), A(-.5, 1.5), sgn * A(3.5, 6), 0, 0), (A(2.0, 3.0), sgn * A(1, 3), A(0, 1.5), sgn * A(3, 5.5), 0, 0), (A(3.2, 4.0), 0, 0, 0, 0, 0)]
+        elif kind == "sigh":
+            k = [(0, 0, 0, 0, 0, 0), (A(.9, 1.2), 0, A(-2.5, -1.5), 0, A(.2, .4), A(.12, .22)), (A(1.7, 2.1), 0, A(2.5, 3.8), A(-.5, .5), A(.5, .8), A(.2, .35)), (A(2.8, 3.4), 0, 0, 0, 0, 0)]
+        elif kind == "double_take":
+            k = [(0, 0, 0, 0, 0, 0), (.35, sgn * A(6, 9), A(-.5, 1), sgn * A(.5, 1.5), 0, 0), (A(.9, 1.2), sgn * A(6, 9), 0, sgn, 0, 0), (A(1.5, 1.9), -sgn * A(1, 3), 0, 0, A(.3, .6), 0), (A(2.6, 3.2), 0, 0, 0, 0, 0)]
+        elif kind == "ponder":
+            k = [(0, 0, 0, 0, 0, 0), (A(.7, 1.1), 0, A(-3, -1.5), 0, A(.1, .3), 0), (A(1.5, 2.2), sgn * A(2, 4), A(-2.5, -1), sgn * A(.5, 1.5), A(.2, .4), A(.05, .12)), (A(2.8, 3.6), 0, 0, 0, 0, 0)]
+        else:  # curious: lean in toward the screen
+            k = [(0, 0, 0, 0, 0, 0), (A(.6, 1.0), sgn * A(1, 2.5), A(1.5, 3), sgn * A(1.5, 3), 0, 0), (A(2.0, 3.0), sgn * A(1, 2.5), A(1, 2.5), sgn * A(1.5, 3), 0, A(.05, .15)), (A(3.2, 4.0), 0, 0, 0, 0, 0)]
+        self.kind, self.k = kind, k
+        self.dur = k[-1][0]
+
+    def at(self, now: float):
+        t = now - self.t0
+        if t >= self.dur:
+            return None
+        k = self.k
+        for i in range(len(k) - 1):
+            if k[i][0] <= t <= k[i + 1][0]:
+                f = smooth((t - k[i][0]) / max(1e-6, k[i + 1][0] - k[i][0]))
+                return tuple(a + (b - a) * f for a, b in zip(k[i][1:], k[i + 1][1:]))
+        return None
+
+
 class Idle:
     """What a person does while waiting and listening: breathe, blink, drift a little, now and then glance away."""
 
@@ -138,6 +177,8 @@ class Idle:
         self.next_yawn = self.t0 + rnd.uniform(45.0, 90.0)
         self.yawn_start = None
         self.rnd = rnd
+        self.gesture = None
+        self.next_gesture = self.t0 + rnd.uniform(5.0, 9.0)
         self.settle_until = 0.0
         self.settle = False  # True while a reply is being prepared: stay quiet and neutral so the video fades in cleanly
         self.amp = 1.0
@@ -163,7 +204,7 @@ class Idle:
 
         # blinks: every 2-5.5 s, sometimes doubled
         blink = 0.0
-        if self.blink_start is None and now >= self.next_blink:
+        if self.blink_start is None and not self.settle and now >= self.next_blink:
             self.blink_start = now
         if self.blink_start is not None:
             p = (now - self.blink_start) / 0.19
@@ -212,6 +253,20 @@ class Idle:
                 blink = max(blink, 0.65 * max(0.0, hold))
                 pitch += 3.0 * max(0.0, hold)
                 roll += 0.8 * max(0.0, hold)
+        # a newly invented gesture every so often, so the waiting never looks like a loop
+        if self.gesture is None and not self.settle and self.yawn_start is None and now >= self.next_gesture:
+            self.gesture = Gesture(self.rnd, now)
+        if self.gesture is not None:
+            g = self.gesture.at(now)
+            if g is None or self.settle:
+                self.gesture = None
+                self.next_gesture = now + self.rnd.uniform(6.0, 14.0)
+            else:
+                yaw += g[0]
+                pitch += g[1]
+                roll += g[2]
+                blink = max(blink, g[3])
+                mouth = max(mouth, g[4])
         return dict(yaw=yaw, pitch=pitch, roll=roll, dx=dx, dy=dy, blink=blink, mouth=mouth)
 
 
