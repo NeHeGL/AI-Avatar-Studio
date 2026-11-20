@@ -20,7 +20,7 @@ async function api(path, body) {
 
 const logoutBtn = document.getElementById("logout-btn");
 
-/** The Log out button shows whenever someone is signed in (a name has been chosen). */
+/** The Change profile button shows whenever someone is signed in (a name has been chosen). */
 function updateLogout() {
   if (logoutBtn) logoutBtn.hidden = !state.canonicalName;
 }
@@ -195,7 +195,7 @@ async function handleReturningUser() {
 function renderProfileHome() {
   setCinematicMode(false);
   const name = state.profile?.display_name || state.canonicalName;
-  setPhase(`Hi, ${name}`, "");
+  setPhase("", ""); // the profile name is already shown in the card below
   const p = state.profile;
   root.innerHTML = `
     <section class="card home-card">
