@@ -46,6 +46,15 @@ class Avatar:
 
     def __init__(self, photo: Path, pipe: LivePortraitPipeline):
         self.pipe = pipe
+        # per-person options (cinematic/options.json): {"glasses": true} calms everything around the eyes, because the face
+        # model drags spectacles along with the eyelids and the eyeballs
+        try:
+            opts = json.loads((photo.parent / "options.json").read_text(encoding="utf-8"))
+        except Exception:
+            opts = {}
+        self.glasses = bool(opts.get("glasses"))
+        self.rest_blink = 0.0 if self.glasses else REST_BLINK
+        self.blink_scale = 0.3 if self.glasses else 1.0
         self.lock = threading.RLock()
         self.w = pipe.live_portrait_wrapper
         crop = CropConfig()
@@ -133,12 +142,18 @@ class Avatar:
         if emotion and emo_w > 0.01:
             e_delta, e_blink = emotion_table(self.s_info["exp"].device).get(emotion, (None, 0.0))
             if e_delta is not None:
+                if self.glasses:  # no eye or gaze offsets (they cross the eyes and shove the glasses about)
+                    mask = torch.ones_like(e_delta)
+                    mask[:, [1, 2, 11, 13, 15, 16], :] = 0.0
+                    e_delta, e_blink = e_delta * mask, 0.0
                 info["exp"] = info["exp"] + emo_w * e_delta
                 blink = max(blink, e_blink * emo_w)
         if exp is not None and exp_w > 0.01:  # a facial expression (smile, raised brows, ...) laid over the neutral face
             info["exp"] = info["exp"] + exp_w * exp
         x_d = self.w.transform_keypoint(info)
-        blink = REST_BLINK + max(blink, 0.0) * (1.0 - REST_BLINK)
+        if self.glasses:
+            blink = max(blink, 0.0)  # never wider than the photo; blinks are small so the glasses hardly move
+        blink = self.rest_blink + (blink * self.blink_scale if blink > 0 else blink) * (1.0 - self.rest_blink)
         if abs(blink) > 0.01:
             eye_t = torch.tensor([[self.eye0 * (1.0 - blink)]], device=self.w.device)
             x_d = x_d + self.w.retarget_eye(self.x_s, torch.cat([self.c_s_e, eye_t], dim=1)) - self.eye_open_delta

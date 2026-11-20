@@ -112,6 +112,55 @@ def _models():
     return _state["ears"], _state["tts"]
 
 
+def _active_rms_db(x: np.ndarray, sr: int) -> float:
+    """Loudness of the speech itself (silence between words ignored), in dBFS."""
+    n = max(1, int(sr * 0.05))
+    fr = x[: len(x) // n * n].reshape(-1, n)
+    e = np.sqrt((fr ** 2).mean(axis=1))
+    act = e[e > max(e.max() * 0.1, 1e-5)]
+    return float(20 * np.log10(np.sqrt((act ** 2).mean()) + 1e-9)) if len(act) else -60.0
+
+
+def _level_to(x: np.ndarray, sr: int, target_db: float = -18.0, peak: float = 0.97) -> np.ndarray:
+    """Bring speech to a comfortable, consistent loudness, with a soft limiter so peaks never clip."""
+    g = 10 ** ((target_db - _active_rms_db(x, sr)) / 20)
+    y = x * min(g, 40.0)
+    over = np.abs(y) > peak
+    if over.any():
+        y = np.where(over, np.sign(y) * (peak + (1 - peak) * np.tanh((np.abs(y) - peak) / (1 - peak))), y)
+    return y.astype(np.float32)
+
+
+def _prepare_reference(x: np.ndarray, sr: int) -> tuple[np.ndarray, int]:
+    """The recording the voice is cloned from: mono, at a proper level, the best ~10 seconds of it (the cloner only listens to
+    about that much), and if it is a phone-quality recording (almost nothing above 3 kHz) its brightness is partly restored."""
+    import scipy.signal as sps
+
+    x = x.astype(np.float32)
+    if x.ndim > 1:
+        x = x.mean(axis=1)
+    x = x - float(np.mean(x))
+    # phone-band recording: resample up and add soft harmonics in the missing top octave so the voice is not dull
+    spec = np.abs(np.fft.rfft(x * np.hanning(len(x))))
+    freqs = np.fft.rfftfreq(len(x), 1 / sr)
+    if sr <= 16000 and spec[freqs > 3000].sum() / max(spec.sum(), 1e-9) < 0.05:
+        up = 24000
+        x = sps.resample_poly(x, up, sr).astype(np.float32)
+        sr = up
+        hi = sps.sosfilt(sps.butter(4, 3400, "highpass", fs=sr, output="sos"), np.tanh(3.0 * x / (np.abs(x).max() + 1e-6)))
+        x = x + 0.35 * hi * (np.sqrt((x ** 2).mean()) / (np.sqrt((hi ** 2).mean()) + 1e-9))
+    # the loudest 10 s window (most speech), if the recording is longer
+    win = int(10 * sr)
+    if len(x) > win:
+        e = np.convolve(x ** 2, np.ones(int(0.05 * sr)), "same")
+        speech = (e > e.max() * 0.02).astype(np.float32)
+        cum = np.concatenate([[0], np.cumsum(speech)])
+        starts = np.arange(0, len(x) - win, int(0.25 * sr))
+        best = starts[int(np.argmax(cum[starts + win] - cum[starts]))]
+        x = x[best : best + win]
+    return _level_to(x, sr), sr
+
+
 def _use_voice(key: str, ref_wav: Path) -> None:
     tts = _state["tts"]
     if _state["voice_key"] != key:
@@ -313,6 +362,7 @@ def start(canonical_name: str) -> dict:
         _models()
         OUT.mkdir(exist_ok=True)
         x, sr = _load_any_audio(ref)
+        x, sr = _prepare_reference(x, sr)
         ref_wav = OUT / f"_ref_{re.sub(r'[^a-z0-9]+', '_', key.lower())}.wav"
         import soundfile as sf
 
@@ -338,7 +388,7 @@ def _speak(sess: Session, text: str) -> bytes:
     with _lock:
         _use_voice(sess.key, sess.ref_wav)  # type: ignore[attr-defined]
         wav = tts.generate(text, cfg_weight=0.5, exaggeration=0.5)
-    return _wav_bytes(wav.squeeze().cpu().numpy(), tts.sr)
+    return _wav_bytes(_level_to(wav.squeeze().cpu().numpy(), tts.sr), tts.sr)
 
 
 def _ditto_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> str:
@@ -362,8 +412,12 @@ def _ditto_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> s
             if time.time() - old.stat().st_mtime > 600:
                 old.unlink(missing_ok=True)
         out = talk_dir / f"reply_{uuid.uuid4().hex[:10]}.mp4"
+        try:
+            glasses = bool(json.loads((user_dir / "cinematic" / "options.json").read_text(encoding="utf-8")).get("glasses"))
+        except Exception:
+            glasses = False
         url = os.environ.get("AVATAR_DITTO_URL", "http://127.0.0.1:8771") + "/render?" + urllib.parse.urlencode(
-            {"source": str(source), "out": str(out), **({"emotion": mood} if mood and mood != "neutral" else {})}
+            {"source": str(source), "out": str(out), **({"emotion": mood} if mood and mood != "neutral" else {}), **({"calm_eyes": 1} if glasses else {})}
         )
         t0 = time.time()
         req = urllib.request.Request(url, data=wav_bytes, method="POST", headers={"Content-Type": "audio/wav"})

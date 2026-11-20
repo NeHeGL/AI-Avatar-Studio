@@ -263,7 +263,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     // proof of life: saved loops chain with gaps under a second. If none has played for 8 s, they cannot play here:
     // use the live face (which always moves) instead of freezing on a still photo.
     const lastAlive = Math.max(lastProgress, lastBankEnd, mainIdleSince);
-    if (bankOn() && Date.now() - lastAlive > 8000) {
+    if (bankWasOn && bankOn() && Date.now() - lastAlive > 8000) {
       bankFails = 3;
       note("The saved waiting animations would not play in this browser; using the live face instead.");
     }
@@ -390,6 +390,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     }
     if (bankOn() && !bankWasOn) {
       bankWasOn = true;
+      lastBankEnd = lastProgress = Date.now(); // the proof-of-life clock starts now, not when the page opened (first runs wait a while)
       baseStill.src = `${bankBase}/rest.jpg`; // the exact frame every animation starts and ends on
       setLive(false);
       tickBank();

@@ -85,7 +85,7 @@ def health():
 EXPR_FILE = HERE / "expressions.json"
 
 
-def _emotion_delta(name: str):
+def _emotion_delta(name: str, calm_eyes: bool = False):
     """The 1x63 expression offset for a named mood (recipes shared with the live face), or None."""
     import json
 
@@ -98,13 +98,15 @@ def _emotion_delta(name: str):
     d = np.zeros((1, 63), dtype=np.float32)
     MOUTH = {6, 7, 12, 14, 17, 19, 20}  # the lip-sync already moves the mouth: only a small share of the mood goes there
     for kp, ax, amt in rec.get("exp", []):
+        if calm_eyes and int(kp) in (1, 2, 11, 13, 15, 16):  # glasses: leave the eyes and gaze alone
+            continue
         d[0, int(kp) * 3 + "xyz".index(ax)] += float(amt) * (0.3 if int(kp) in MOUTH else 1.0)
     return d
 
 
-def _mood_ctrl(name: str, n_frames: int, strength: float = 1.0) -> dict:
+def _mood_ctrl(name: str, n_frames: int, strength: float = 1.0, calm_eyes: bool = False) -> dict:
     """Per-frame expression offsets: ease into the mood, hold it, ease most of the way out by the end of the sentence."""
-    d = _emotion_delta(name)
+    d = _emotion_delta(name, calm_eyes)
     if d is None:
         return {}
     ctrl = {}
@@ -117,7 +119,7 @@ def _mood_ctrl(name: str, n_frames: int, strength: float = 1.0) -> dict:
 
 
 @app.post("/render")
-async def render(request: Request, source: str, out: str, emotion: str = "", intensity: float = 0.55):
+async def render(request: Request, source: str, out: str, emotion: str = "", intensity: float = 0.55, calm_eyes: int = 0):
     data = await request.body()
     TMP.mkdir(parents=True, exist_ok=True)
     wav = TMP / f"{uuid.uuid4().hex[:10]}.wav"
@@ -133,7 +135,7 @@ async def render(request: Request, source: str, out: str, emotion: str = "", int
                 import soundfile as sf
 
                 n = int(np.ceil(sf.info(str(wav)).duration * 25)) + 2
-                more["run_kwargs"] = {"ctrl_info": _mood_ctrl(emotion, n, intensity)}
+                more["run_kwargs"] = {"ctrl_info": _mood_ctrl(emotion, n, intensity, bool(calm_eyes))}
             run(SDK, str(wav), source, str(out_path), more)
             return time.time() - t
 

@@ -76,6 +76,37 @@ def _frame_head(img: np.ndarray) -> np.ndarray:
     return img[0:side, x0 : x0 + side]
 
 
+def _noise_sigma(img: np.ndarray) -> float:
+    """Rough grain level (standard deviation) of a picture."""
+    g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    hp = g - cv2.GaussianBlur(g, (0, 0), 1.5)
+    return float(1.4826 * np.median(np.abs(hp - np.median(hp))))
+
+
+def enhance_photo(img: np.ndarray) -> np.ndarray:
+    """Clean up a grainy or colour-cast photo (a scanned print, an old snapshot) so the face model and the background
+    cut-out have something smooth to work with. Clean photos are returned untouched."""
+    sigma = _noise_sigma(img)
+    h, w = img.shape[:2]
+    m = img.reshape(-1, 3).mean(axis=0)
+    if sigma <= 2.5 and m.max() / max(m.min(), 1.0) < 1.25:  # already clean, no strong colour cast: leave it exactly as it is
+        return img
+    out = img
+    if sigma > 2.5:  # grain: non-local-means denoise (luma harder than colour), blended so skin keeps some texture
+        strength = float(min(11.0, 2.5 + 2.6 * sigma))
+        den = cv2.fastNlMeansDenoisingColored(out, None, strength, strength * 0.9, 7, 25)
+        den = cv2.fastNlMeansDenoisingColored(den, None, strength * 0.4, strength * 0.4, 5, 15)  # a second, lighter pass
+        out = cv2.addWeighted(den, 0.85, out, 0.15, 0)
+        blur = cv2.GaussianBlur(out, (0, 0), max(1.2, w / 700))
+        out = cv2.addWeighted(out, 1.45, blur, -0.45, 0)  # unsharp mask brings back edges (eyes, glasses, hairline)
+    # keep the photo's own warmth: only correct a strong colour cast, and only slightly
+    mean = out.reshape(-1, 3).mean(axis=0)
+    gain = 1.0 + 0.1 * (mean.mean() / np.maximum(mean, 1.0) - 1.0)
+    out = np.clip(out.astype(np.float32) * gain, 0, 255).astype(np.uint8)
+    lab = cv2.cvtColor(out, cv2.COLOR_BGR2LAB)
+    return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+
 def _clean_borders(img: np.ndarray) -> np.ndarray:
     """Cut away black bars (camera frame edges) and the black corners left by circular scan crops."""
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -95,7 +126,7 @@ def _clean_borders(img: np.ndarray) -> np.ndarray:
         yy, xx = np.mgrid[0:side, 0:side]
         outside = ((xx - side / 2) ** 2 + (yy - side / 2) ** 2 > (side / 2 - 2) ** 2).astype(np.uint8) * 255
         img = cv2.inpaint(img, outside, 6, cv2.INPAINT_TELEA)
-    img = _frame_head(img)
+    img = enhance_photo(_frame_head(img))
     # small photos: enlarge so the later steps have enough pixels to work with (they will be soft; a rescan fixes that)
     h, w = img.shape[:2]
     if min(h, w) < 640:
