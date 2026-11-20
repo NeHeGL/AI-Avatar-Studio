@@ -67,7 +67,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   figure.appendChild(fg);
   const matteUrl = `${base}/cinematic/matte.png`;
   const sourceUrl = `${base}/cinematic/source.jpg`;
-  const BG_KEY = `avatar-bg-${base.split("/").pop()}`;
+  const BG_KEY = `avatar-bg2-${base.split("/").pop()}`;
   let matteReady = false;
   const bokeh = (colors) =>
     colors
@@ -105,15 +105,17 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     bg.style.backgroundPosition = "center";
     bg.style.filter = on && choice.filter ? choice.filter : "none";
     bg.style.transform = on && choice.filter ? "scale(1.08)" : "none";
+  }
+  const rememberBackground = (key) => {
     try {
-      localStorage.setItem(BG_KEY, key);
+      localStorage.setItem(BG_KEY, key); // only what the person picked is remembered
     } catch {
       /* ignore */
     }
-  }
-  let bgKey = "studio"; // the default look
+  };
+  let bgKey = "original"; // the default look
   try {
-    bgKey = localStorage.getItem(BG_KEY) || "studio";
+    bgKey = localStorage.getItem(BG_KEY) || "original";
   } catch {
     /* ignore */
   }
@@ -147,6 +149,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
       b.addEventListener("click", () => {
         bgKey = key;
         applyBackground(key);
+        rememberBackground(key);
       });
       return b;
     };
@@ -172,6 +175,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
         }
         bgKey = "custom";
         applyBackground("custom");
+        rememberBackground("custom");
       };
       img.src = URL.createObjectURL(f);
     });
