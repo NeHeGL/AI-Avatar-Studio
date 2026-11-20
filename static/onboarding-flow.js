@@ -93,7 +93,7 @@ export async function runSetupPipeline(ctx, opts = {}) {
   if (needFace) {
     let skipFace = (await faceIntro()) === "skip";
     if (!skipFace) {
-      const { runFaceScan } = await import("/static/orbit-scan.js?v=34");
+      const { runFaceScan } = await import("/static/orbit-scan.js?v=35");
       let faceResult = await runFaceScan(root, state.canonicalName, api);
       while (!faceResult?.profile) {
         // Back / cancel from the scan: offer the retry, or going on without a face scan (it used to dead-end here).

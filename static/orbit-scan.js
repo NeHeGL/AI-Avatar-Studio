@@ -1459,7 +1459,7 @@ export async function runFaceScan(root, canonicalName, api) {
 
   async function startCamera() {
     try {
-      const mod = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14");
+      const mod = await import("/static/vendor/mediapipe/vision_bundle.mjs");
       edges = mod.FaceLandmarker?.FACE_LANDMARKS_TESSELATION || null;
       mod2 = mod;
     } catch {
@@ -1473,7 +1473,7 @@ export async function runFaceScan(root, canonicalName, api) {
       video.srcObject = stream;
       await video.play();
     }
-    const { createCameraFraming } = await import("/static/camera-framing.js?v=29");
+    const { createCameraFraming } = await import("/static/camera-framing.js?v=31");
     framing = await createCameraFraming(video, videoWrap, null, {
       mode: "face",
       steadyFrame: false,

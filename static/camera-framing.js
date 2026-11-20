@@ -2,10 +2,8 @@
  * Live camera: fill the frame and smoothly pan/zoom to keep the face centered.
  */
 
-const WASM =
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
-const MODEL =
-  "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+const WASM = "/static/vendor/mediapipe/wasm"; // served from this project: no internet needed, nothing for an ad blocker to block
+const MODEL = "/static/vendor/mediapipe/face_landmarker.task";
 
 function ensurePanLayer(container, video) {
   let pan = container.querySelector(".scan-video-pan");
@@ -86,7 +84,7 @@ export async function createCameraFraming(video, container, hintEl, options = {}
       status(`Loading face tracking (${delegate})…`);
       try {
         const { FaceLandmarker, FilesetResolver } = await import(
-          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14"
+          "/static/vendor/mediapipe/vision_bundle.mjs"
         );
         const vision = await FilesetResolver.forVisionTasks(WASM);
         landmarker = await withTimeout(FaceLandmarker.createFromOptions(vision, {

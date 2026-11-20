@@ -314,7 +314,7 @@ export async function runFaceScan(root, canonicalName, api) {
       await video.play();
     }
 
-    const { createCameraFraming } = await import("/static/camera-framing.js?v=29");
+    const { createCameraFraming } = await import("/static/camera-framing.js?v=31");
     framing = await createCameraFraming(video, videoWrap, null, {
       mode: "face",
       steadyFrame: false,

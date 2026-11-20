@@ -11,10 +11,9 @@
  *   depth buffer — so the head genuinely turns in 3D.
  */
 
-const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+const TASKS_URL = "/static/vendor/mediapipe";
 const WASM = `${TASKS_URL}/wasm`;
-const MODEL =
-  "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+const MODEL = "/static/vendor/mediapipe/face_landmarker.task";
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const smoothstep = (e0, e1, x) => {
@@ -59,7 +58,7 @@ function getLandmarker(delegate, mode) {
   const key = `${delegate}-${mode}`;
   if (!landmarkerPromises[key]) {
     landmarkerPromises[key] = (async () => {
-      const { FaceLandmarker, FilesetResolver } = await import(TASKS_URL);
+      const { FaceLandmarker, FilesetResolver } = await import(`${TASKS_URL}/vision_bundle.mjs`);
       const vision = await FilesetResolver.forVisionTasks(WASM);
       const lmk = await FaceLandmarker.createFromOptions(vision, {
         baseOptions: { modelAssetPath: MODEL, delegate },
