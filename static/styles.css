@@ -1024,15 +1024,12 @@ body.cinematic .orbit-card.face-scan-card { background: transparent; border: non
 .orbit-legend { height: 1.3rem; overflow: hidden; white-space: nowrap; }
 .orbit-pane .orbit-cap { height: 1.3rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 100%; }
 
-/* signature, bottom right of every screen */
+/* signature: under the content, right-aligned with the card (the same column as the title and the avatar box) */
 .credit {
-  position: fixed;
-  right: 18px;
-  bottom: 12px;
+  margin-top: 1.25rem;
+  text-align: right;
   font-size: 0.9rem;
   color: #a9b4c9;
   opacity: 0.9;
-  pointer-events: none;
   user-select: none;
-  z-index: 5;
 }
