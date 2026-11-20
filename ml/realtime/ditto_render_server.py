@@ -116,7 +116,7 @@ def _mood_ctrl(name: str, n_frames: int, strength: float = 1.0) -> dict:
 
 
 @app.post("/render")
-async def render(request: Request, source: str, out: str, emotion: str = "", intensity: float = 1.0):
+async def render(request: Request, source: str, out: str, emotion: str = "", intensity: float = 0.65):
     data = await request.body()
     TMP.mkdir(parents=True, exist_ok=True)
     wav = TMP / f"{uuid.uuid4().hex[:10]}.wav"

@@ -226,7 +226,26 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   let lastBank = "";
   let bankWasOn = false;
   let restWaiters = [];
-  const bankOn = () => bank.length >= 6;
+  let bankFails = 0;
+  let lastBankEnd = Date.now();
+  let lastProgress = Date.now();
+  const bankOn = () => bank.length >= 6 && bankFails < 3; // after repeated failures the live face does the waiting
+  bankVideo.addEventListener("timeupdate", () => (lastProgress = Date.now()));
+  // watchdog: if the chain of animations ever stalls or breaks, restart it (or hand over to the live face)
+  const bankWatch = setInterval(() => {
+    if (disposed || mainActive) return;
+    if (bank.length >= 6 && bankFails >= 3 && !liveWanted) {
+      setLive(true);
+      return;
+    }
+    if (!bankOn()) return;
+    if (bankPlaying && Date.now() - lastProgress > 5000) {
+      bankFails += 1;
+      bankPlaying = false;
+      resolveRest();
+    }
+    if (!bankPlaying && Date.now() - lastBankEnd > 3000) tickBank();
+  }, 2500);
   const showLive = () => !bankOn() || liveWanted;
   const resolveRest = () => {
     const w = restWaiters;
@@ -264,10 +283,12 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
         bankVideo.onerror = res;
         setTimeout(res, (c.dur + 1) * 1000);
       });
-    } catch {
-      /* skip this one */
+    } catch (e) {
+      bankFails += 1;
+      note(`Waiting animation problem (${e?.name || e}); ${bankFails}/3`);
     }
     bankPlaying = false;
+    lastBankEnd = Date.now();
     resolveRest();
   }
   function tickBank() {
@@ -549,6 +570,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
       clearTimeout(bankTimer);
       clearTimeout(resumeTimer);
       clearTimeout(bankLoadTimer);
+      clearInterval(bankWatch);
       bankVideo.remove();
       pickerEl?.remove();
       bg.remove();
