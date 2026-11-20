@@ -110,7 +110,7 @@ function renderSectionsList(profile) {
   ul.innerHTML = `
     <li>Face scan <span class="badge ${s.scan.complete ? "done" : "pending"}">${scanLabel}</span></li>
     <li>Voice <span class="badge ${s.voice.complete ? "done" : "pending"}">${voiceLabel}</span></li>
-    <li>Other <span class="badge ${s.other.complete ? "done" : "pending"}">${otherLabel}</span></li>
+    <li>Data <span class="badge ${s.other.complete ? "done" : "pending"}">${otherLabel}</span></li>
   `;
 }
 
@@ -249,7 +249,7 @@ function renderUpdateAvatarScreen() {
           <span class="badge ${s.voice.complete ? "done" : "pending"}">${s.voice.complete ? "Complete" : "Update"}</span>
         </button>
         <button type="button" class="update-menu-item" id="upd-other">
-          <span class="update-menu-title">Other</span>
+          <span class="update-menu-title">Data</span>
           <span class="badge ${s.other.complete ? "done" : "pending"}">${s.other.complete ? "Complete" : "Update"}</span>
         </button>
       </div>
@@ -371,7 +371,7 @@ async function openOtherEditor() {
   const o = state.profile?.other_preview || {};
   root.innerHTML = `
     <section class="step-card step-card--center">
-      <h2 class="step-title">Other details</h2>
+      <h2 class="step-title">Data</h2>
       <label class="field-label">Display name</label>
       <input type="text" class="step-input" id="other-display" value="${escapeAttr(o.display_name || state.canonicalName)}" />
       <label class="field-label">Notes</label>
@@ -439,7 +439,7 @@ function renderUpdateChooser() {
         </div>
         <div class="update-block" data-section="other">
           <label class="check-head">
-            <input type="checkbox" id="chk-other" /> Other
+            <input type="checkbox" id="chk-other" /> Data
           </label>
           <div class="preview" id="prev-other">
             <div class="other-preview">${escapeHtml(formatOther(p.other_preview))}</div>
@@ -618,7 +618,7 @@ function renderCapturePreview(profile) {
       <h3>What you've captured (draft)</h3>
       <div class="capture-block"><strong>Face</strong>${scanHtml}</div>
       <div class="capture-block"><strong>Voice</strong><div class="voice-preview-list">${voiceHtml}</div></div>
-      <div class="capture-block"><strong>Other</strong>${otherHtml}</div>
+      <div class="capture-block"><strong>Data</strong>${otherHtml}</div>
     </section>
   `;
 }
