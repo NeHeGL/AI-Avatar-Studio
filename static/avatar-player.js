@@ -14,9 +14,14 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
   const frames = (profile.scan_frames?.length ? profile.scan_frames : profile.scan_previews) || [];
   const stillPhoto = profile.avatar_face_url || frames[0]?.url || "";
 
+  // The first picture on screen is the person's prepared photo (the rest frame once their animations exist), never the raw scan
+  // photo, so nothing in a different crop flashes up before the avatar loads.
+  const mediaBase = (stillPhoto.match(/^(.*\/media\/[^/]+)\//) || [])[1] || "";
+  const firstPic = mediaBase ? `${mediaBase}/cinematic/idle_bank/rest.jpg` : stillPhoto;
+
   stageEl.innerHTML = `
     <div class="avatar-figure mesh has-face" id="avatar">
-      ${stillPhoto ? `<img id="avatar-still" src="${escapeAttr(stillPhoto)}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 30%;" />` : ""}
+      ${stillPhoto ? `<img id="avatar-still" src="${escapeAttr(firstPic)}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;" />` : ""}
     </div>
     <h2>${escapeHtml(name)}</h2>
     <p id="avatar-status" class="avatar-note muted">Starting…</p>
@@ -33,6 +38,15 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
     </div>
   `;
 
+  const stillEl = stageEl.querySelector("#avatar-still");
+  if (stillEl && mediaBase) {
+    // rest frame -> prepared photo -> raw scan photo, whichever exists first
+    const chain = [`${mediaBase}/cinematic/source.jpg`, stillPhoto];
+    stillEl.addEventListener("error", () => {
+      const next = chain.shift();
+      if (next) stillEl.src = next;
+    });
+  }
   const audio = stageEl.querySelector("#avatar-audio");
   const statusEl = stageEl.querySelector("#avatar-status");
   const muteBtn = stageEl.querySelector("#chat-mute");

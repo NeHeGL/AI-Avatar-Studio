@@ -470,11 +470,40 @@ def build_bank(av: "Avatar", folder: Path, still_current, quiet=lambda: True, no
     cv2.imwrite(str(folder / "rest.jpg"), cv2.cvtColor(rest, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 95])
     h, w = rest.shape[:2]
     w2, h2 = w - w % 2, h - h % 2
+    import hashlib
+
     try:
-        done = json.loads(manifest_path.read_text(encoding="utf-8"))["clips"]
+        old = json.loads(manifest_path.read_text(encoding="utf-8"))
+        done, stamp = old["clips"], old.get("source_sha")
     except Exception:
-        done = []
+        done, stamp = [], None
     done = [c for c in done if (folder / c["file"]).exists()]
+    # Every animation must come from the SAME photo as the rest frame (and the intro). The set records which photo it was made
+    # from; clips made from any other photo are thrown away instead of being mixed in (that is what made the picture jump).
+    try:
+        sha = hashlib.sha1((folder.parent / "source.jpg").read_bytes()).hexdigest()[:12]
+    except Exception:
+        sha = ""
+    rest_g = cv2.GaussianBlur(cv2.cvtColor(rest, cv2.COLOR_RGB2GRAY).astype(np.float32), (0, 0), 1.5)
+
+    def matches_rest(c) -> bool:
+        cap = cv2.VideoCapture(str(folder / c["file"]))
+        ok, fr = cap.read()
+        cap.release()
+        if not ok:
+            return False
+        g = cv2.GaussianBlur(cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY).astype(np.float32), (0, 0), 1.5)
+        return g.shape == rest_g.shape and float(np.abs(g - rest_g).mean()) < 8.0
+
+    if stamp != sha:
+        keep = [c for c in done if stamp is None and matches_rest(c)]  # sets from before the stamp existed: keep only matching clips
+        for c in done:
+            if c not in keep:
+                for nm in (c["file"], c.get("webm")):
+                    if nm:
+                        (folder / nm).unlink(missing_ok=True)
+        print(f"bank: photo changed or unrecorded; kept {len(keep)} of {len(done)} clips", flush=True)
+        done = keep
     for c in done:  # clips made before the think list grew
         c["think"] = c["kind"] in THINK_KINDS
         if c.get("webm") and not (folder / c["webm"]).exists():
@@ -490,7 +519,7 @@ def build_bank(av: "Avatar", folder: Path, still_current, quiet=lambda: True, no
 
     def save():
         purge()
-        manifest_path.write_text(json.dumps({"rest": "rest.jpg", "width": w2, "height": h2, "fps": Clip.FPS, "clips": done}, indent=1), encoding="utf-8")
+        manifest_path.write_text(json.dumps({"rest": "rest.jpg", "source_sha": sha, "width": w2, "height": h2, "fps": Clip.FPS, "clips": done}, indent=1), encoding="utf-8")
 
     save()
     have_model = MATTE_MODEL.exists()

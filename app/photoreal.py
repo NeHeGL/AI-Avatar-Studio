@@ -142,10 +142,21 @@ def ensure_source(canonical_name: str, force: bool = False) -> Path | None:
         return out
     try:
         profile = get_working_profile(canonical_name)
-        face = pick_avatar_face(face_assets(profile))
-        if face is None or not Path(face.path).exists():
-            return None
-        img = cv2.imread(str(face.path))
+        photo_path: Path | None = None
+        # an explicit choice stored with the person's media (cinematic/options.json -> "source_photo") wins: it survives profile
+        # data being reverted, and it keeps the picture every clip was made from from silently changing
+        try:
+            chosen = json.loads((out.parent / "options.json").read_text(encoding="utf-8")).get("source_photo")
+            if chosen and (out.parent.parent / "scan" / chosen).exists():
+                photo_path = out.parent.parent / "scan" / chosen
+        except Exception:
+            pass
+        if photo_path is None:
+            face = pick_avatar_face(face_assets(profile))
+            if face is None or not Path(face.path).exists():
+                return None
+            photo_path = Path(face.path)
+        img = cv2.imread(str(photo_path))
         if img is None:
             return None
         img = _clean_borders(img)
@@ -156,7 +167,7 @@ def ensure_source(canonical_name: str, force: bool = False) -> Path | None:
         cv2.imwrite(str(out), img, [cv2.IMWRITE_JPEG_QUALITY, 95])
         head_ok, head_note = head_in_frame(img)
         (out.parent / "source_info.json").write_text(
-            json.dumps({"from": Path(face.path).name, "width": w, "height": h, "head_in_frame": head_ok, "head_note": head_note}, indent=2),
+            json.dumps({"from": photo_path.name, "width": w, "height": h, "head_in_frame": head_ok, "head_note": head_note}, indent=2),
             encoding="utf-8",
         )
         return out
