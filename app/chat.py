@@ -131,36 +131,6 @@ def _level_to(x: np.ndarray, sr: int, target_db: float = -18.0, peak: float = 0.
     return y.astype(np.float32)
 
 
-def _prepare_reference(x: np.ndarray, sr: int) -> tuple[np.ndarray, int]:
-    """The recording the voice is cloned from: mono, at a proper level, the best ~10 seconds of it (the cloner only listens to
-    about that much), and if it is a phone-quality recording (almost nothing above 3 kHz) its brightness is partly restored."""
-    import scipy.signal as sps
-
-    x = x.astype(np.float32)
-    if x.ndim > 1:
-        x = x.mean(axis=1)
-    x = x - float(np.mean(x))
-    # phone-band recording: resample up and add soft harmonics in the missing top octave so the voice is not dull
-    spec = np.abs(np.fft.rfft(x * np.hanning(len(x))))
-    freqs = np.fft.rfftfreq(len(x), 1 / sr)
-    if sr <= 16000 and spec[freqs > 3000].sum() / max(spec.sum(), 1e-9) < 0.05:
-        up = 24000
-        x = sps.resample_poly(x, up, sr).astype(np.float32)
-        sr = up
-        hi = sps.sosfilt(sps.butter(4, 3400, "highpass", fs=sr, output="sos"), np.tanh(3.0 * x / (np.abs(x).max() + 1e-6)))
-        x = x + 0.35 * hi * (np.sqrt((x ** 2).mean()) / (np.sqrt((hi ** 2).mean()) + 1e-9))
-    # the loudest 10 s window (most speech), if the recording is longer
-    win = int(10 * sr)
-    if len(x) > win:
-        e = np.convolve(x ** 2, np.ones(int(0.05 * sr)), "same")
-        speech = (e > e.max() * 0.02).astype(np.float32)
-        cum = np.concatenate([[0], np.cumsum(speech)])
-        starts = np.arange(0, len(x) - win, int(0.25 * sr))
-        best = starts[int(np.argmax(cum[starts + win] - cum[starts]))]
-        x = x[best : best + win]
-    return _level_to(x, sr), sr
-
-
 def _use_voice(key: str, ref_wav: Path) -> None:
     tts = _state["tts"]
     if _state["voice_key"] != key:
@@ -362,7 +332,6 @@ def start(canonical_name: str) -> dict:
         _models()
         OUT.mkdir(exist_ok=True)
         x, sr = _load_any_audio(ref)
-        x, sr = _prepare_reference(x, sr)
         ref_wav = OUT / f"_ref_{re.sub(r'[^a-z0-9]+', '_', key.lower())}.wav"
         import soundfile as sf
 
@@ -383,12 +352,46 @@ def start(canonical_name: str) -> dict:
     }
 
 
+VOICE_GUARD_TRIES = int(os.environ.get("AVATAR_VOICE_GUARD_TRIES", "2"))  # 1 = no guard
+VOICE_GUARD_OK = float(os.environ.get("AVATAR_VOICE_GUARD_OK", "0.80"))  # similarity that needs no second try
+
+
+def _voice_similarity(tts, samples: np.ndarray, ref_emb: np.ndarray) -> float:
+    """How close a generated sentence is to the recording's own voice fingerprint (1.0 = identical)."""
+    import scipy.signal as sps
+
+    x16 = sps.resample_poly(samples.astype(np.float32), 16000, tts.sr)
+    e = tts.ve.embeds_from_wavs([x16], sample_rate=16000)[0]
+    e = e / (np.linalg.norm(e) + 1e-9)
+    r = ref_emb / (np.linalg.norm(ref_emb) + 1e-9)
+    return float(np.dot(e, r))
+
+
 def _speak(sess: Session, text: str) -> bytes:
     tts = _state["tts"]
     with _lock:
         _use_voice(sess.key, sess.ref_wav)  # type: ignore[attr-defined]
-        wav = tts.generate(text, cfg_weight=0.5, exaggeration=0.5)
-    return _wav_bytes(_level_to(wav.squeeze().cpu().numpy(), tts.sr), tts.sr)
+        best = None
+        ref_emb = None
+        for attempt in range(max(1, VOICE_GUARD_TRIES)):
+            x = tts.generate(text, cfg_weight=0.5, exaggeration=0.5).squeeze().cpu().numpy()
+            if VOICE_GUARD_TRIES <= 1:
+                best = (1.0, x)
+                break
+            try:
+                if ref_emb is None:
+                    ref_emb = tts.conds.t3.speaker_emb.detach().float().cpu().numpy().reshape(-1)
+                sim = _voice_similarity(tts, x, ref_emb)
+            except Exception as exc:  # the guard must never stop the voice
+                _log("voice guard skipped:", exc)
+                best = (1.0, x)
+                break
+            _log(f"voice match {sim:.2f} (try {attempt + 1}) {text[:30]!r}")
+            if best is None or sim > best[0]:
+                best = (sim, x)
+            if sim >= VOICE_GUARD_OK:
+                break
+    return _wav_bytes(_level_to(best[1], tts.sr), tts.sr)
 
 
 def _ditto_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> str:
