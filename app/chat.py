@@ -174,6 +174,36 @@ def _sentences(tokens, min_chars=24, first_clause_chars=18):
         yield buf.strip()
 
 
+EMOTIONS = ("happy", "amused", "surprised", "interested", "puzzled", "concerned", "thoughtful", "playful", "neutral")
+_TAG = re.compile(r"\[\s*([A-Za-z]+)\s*\]\s*")
+
+
+def _split_mood(sent: str, last: str = "neutral") -> tuple[str, str]:
+    """The reply model starts each sentence with a mood tag like [amused]. Returns (sentence without tags, mood).
+    If the tag is missing, a few cheap cues guess it, otherwise the previous mood carries on."""
+    mood = ""
+    for m in _TAG.finditer(sent):
+        if m.group(1).lower() in EMOTIONS:
+            mood = m.group(1).lower()
+            break
+    text = _TAG.sub("", sent).strip()
+    if not mood:
+        low = text.lower()
+        if re.search(r"\b(ha(ha)+|lol|funny|hilarious|joke)\b", low):
+            mood = "amused"
+        elif re.search(r"\b(wow|no way|seriously|what the|oh my|really\?)", low) or low.endswith("?!"):
+            mood = "surprised"
+        elif re.search(r"\b(sorry|sad|unfortunately|that sucks|i'm afraid)\b", low):
+            mood = "concerned"
+        elif re.search(r"\b(hmm+|let me think|i guess|maybe)\b", low):
+            mood = "thoughtful"
+        elif text.endswith("?"):
+            mood = "interested"
+        else:
+            mood = last
+    return text, mood
+
+
 def _clean(text: str) -> str:
     text = re.sub(r"\((?:note|\w+)[^)]*\)", "", text, flags=re.I)  # stray "(...)" asides
     text = re.sub(r"\bNote:.*$", "", text, flags=re.I)
@@ -217,7 +247,12 @@ def _build_system(display_name: str, notes: str) -> str:
     )
     spoken = (
         "You are in a spoken conversation: one to three short, natural sentences. "
-        "No lists, no markdown, no emojis, no stage directions, no parenthetical notes."
+        "No lists, no markdown, no emojis, no stage directions, no parenthetical notes. "
+        "Begin EVERY sentence with one mood tag in square brackets that matches how you feel saying it, chosen from: "
+        "[happy] [amused] [surprised] [interested] [puzzled] [concerned] [thoughtful] [playful] [neutral]. "
+        "Example: [amused] Ha, that's a good one. [interested] What made you think of it? "
+        "Your face acts out the tag, so use it: smile when something is funny or nice, look surprised when shocked, "
+        "look interested when curious, puzzled when confused, playful when joking. The tags are never spoken."
     )
     if LLM_MODE in ("relaxed", "unlocked", "uncensored"):
         tone = (
@@ -306,7 +341,7 @@ def _speak(sess: Session, text: str) -> bytes:
     return _wav_bytes(wav.squeeze().cpu().numpy(), tts.sr)
 
 
-def _ditto_video_url(canonical_name: str, wav_bytes: bytes) -> str:
+def _ditto_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> str:
     """Photoreal talking video of this sentence from the local Ditto render service; "" on any problem (the page then
     falls back to the animated face). Uses the same wide photo as the pre-rendered clips so the framing never jumps."""
     try:
@@ -324,10 +359,12 @@ def _ditto_video_url(canonical_name: str, wav_bytes: bytes) -> str:
         talk_dir = user_dir / "talk"
         talk_dir.mkdir(parents=True, exist_ok=True)
         for old in talk_dir.glob("reply_*.mp4"):  # keep only recent replies
-            if time.time() - old.stat().st_mtime > 3600:
+            if time.time() - old.stat().st_mtime > 600:
                 old.unlink(missing_ok=True)
         out = talk_dir / f"reply_{uuid.uuid4().hex[:10]}.mp4"
-        url = os.environ.get("AVATAR_DITTO_URL", "http://127.0.0.1:8771") + "/render?" + urllib.parse.urlencode({"source": str(source), "out": str(out)})
+        url = os.environ.get("AVATAR_DITTO_URL", "http://127.0.0.1:8771") + "/render?" + urllib.parse.urlencode(
+            {"source": str(source), "out": str(out), **({"emotion": mood} if mood and mood != "neutral" else {})}
+        )
         t0 = time.time()
         req = urllib.request.Request(url, data=wav_bytes, method="POST", headers={"Content-Type": "audio/wav"})
         with urllib.request.urlopen(req, timeout=180) as r:
@@ -341,11 +378,11 @@ def _ditto_video_url(canonical_name: str, wav_bytes: bytes) -> str:
         return ""
 
 
-def _talk_video_url(canonical_name: str, wav_bytes: bytes) -> str:
+def _talk_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> str:
     """Video for this sentence; empty string if disabled or on failure.
     AVATAR_REPLY_VIDEO=ditto -> local Ditto service (fast, photoreal); AVATAR_PHOTOREAL_VIDEO=1 -> InfiniteTalk (slow)."""
     if os.environ.get("AVATAR_REPLY_VIDEO", "").strip().lower() == "ditto":
-        return _ditto_video_url(canonical_name, wav_bytes)
+        return _ditto_video_url(canonical_name, wav_bytes, mood)
     if os.environ.get("AVATAR_PHOTOREAL_VIDEO", "").strip() != "1":
         return ""
     try:
@@ -438,21 +475,23 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
         # Overlap the work: the language model keeps writing while earlier sentences get their voice and video.
         jobs: "queue.Queue" = queue.Queue()
 
-        def render_sentence(sent: str):
+        def render_sentence(sent: str, mood: str = ""):
             t_a = time.time()
             wav = _speak(sess, sent)
             t_b = time.time()
-            vid = _talk_video_url(canonical_name, wav)
+            vid = _talk_video_url(canonical_name, wav, mood)
             _log(f"timing: sentence ready at +{t_a - t0:.1f}s | voice {t_b - t_a:.1f}s | video {time.time() - t_b:.1f}s | {sent[:40]!r}")
-            return sent, wav, vid
+            return sent, wav, vid, mood
 
         def produce():
             try:
                 with ThreadPoolExecutor(max_workers=2) as pool:
+                    mood = "neutral"
                     for sent in _sentences(_ollama_stream(sess.system, llm_history)):
+                        sent, mood = _split_mood(sent, mood)
                         sent = _clean(sent)
                         if sent:
-                            jobs.put(pool.submit(render_sentence, sent))
+                            jobs.put(pool.submit(render_sentence, sent, mood))
             except Exception as exc:
                 jobs.put(exc)
             finally:
@@ -465,13 +504,13 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
                 break
             if isinstance(item, Exception):
                 raise item
-            sent, wav, video_url = item.result()  # in order: sentence 2 never overtakes sentence 1
-            said.append(sent)
-            yield _ev(type="say", text=sent, audio=base64.b64encode(wav).decode(), video_url=video_url)
+            sent, wav, video_url, mood = item.result()  # in order: sentence 2 never overtakes sentence 1
+            said.append(f"[{mood}] {sent}")  # the tags stay in the history so the model keeps using them
+            yield _ev(type="say", text=sent, mood=mood, audio=base64.b64encode(wav).decode(), video_url=video_url)
             _log(f"said {sent!r} (+{time.time() - t0:.1f}s)")
         if nudge:
             sess.history.append({"role": "user", "content": "(neither of you said anything for a while)"})
-        sess.history.append({"role": "assistant", "content": " ".join(said)})
+        sess.history.append({"role": "assistant", "content": " ".join(said)})  # tagged
         yield _ev(type="done")
     except Exception as exc:  # surface to the page instead of a silent hang
         _log("ERROR", repr(exc))

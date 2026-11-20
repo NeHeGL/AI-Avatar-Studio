@@ -10,6 +10,7 @@ Keeps Ditto's models loaded so each sentence of a reply renders in about 1.3x it
 from __future__ import annotations
 
 import argparse
+import numpy as np
 import os
 import sys
 import threading
@@ -81,8 +82,41 @@ def health():
     return {"ok": True, "max_size": MAX_SIZE}
 
 
+EXPR_FILE = HERE / "expressions.json"
+
+
+def _emotion_delta(name: str):
+    """The 1x63 expression offset for a named mood (recipes shared with the live face), or None."""
+    import json
+
+    try:
+        rec = json.loads(EXPR_FILE.read_text(encoding="utf-8")).get(name)
+    except Exception:
+        return None
+    if not rec:
+        return None
+    d = np.zeros((1, 63), dtype=np.float32)
+    for kp, ax, amt in rec.get("exp", []):
+        d[0, int(kp) * 3 + "xyz".index(ax)] += float(amt)
+    return d
+
+
+def _mood_ctrl(name: str, n_frames: int, strength: float = 1.0) -> dict:
+    """Per-frame expression offsets: ease into the mood, hold it, ease most of the way out by the end of the sentence."""
+    d = _emotion_delta(name)
+    if d is None:
+        return {}
+    ctrl = {}
+    for i in range(n_frames):
+        a = min(1.0, i / 8.0)  # ~0.3 s in
+        if i > n_frames - 10:
+            a = min(a, 0.35 + 0.65 * max(0.0, (n_frames - 1 - i) / 9.0))
+        ctrl[i] = {"delta_exp": d * (strength * a)}
+    return ctrl
+
+
 @app.post("/render")
-async def render(request: Request, source: str, out: str):
+async def render(request: Request, source: str, out: str, emotion: str = "", intensity: float = 1.0):
     data = await request.body()
     TMP.mkdir(parents=True, exist_ok=True)
     wav = TMP / f"{uuid.uuid4().hex[:10]}.wav"
@@ -93,7 +127,13 @@ async def render(request: Request, source: str, out: str):
     def work():
         with LOCK:
             t = time.time()
-            run(SDK, str(wav), source, str(out_path), {"setup_kwargs": {"max_size": MAX_SIZE, **({"sampling_timesteps": STEPS} if STEPS else {})}})
+            more = {"setup_kwargs": {"max_size": MAX_SIZE, **({"sampling_timesteps": STEPS} if STEPS else {})}}
+            if emotion:
+                import soundfile as sf
+
+                n = int(np.ceil(sf.info(str(wav)).duration * 25)) + 2
+                more["run_kwargs"] = {"ctrl_info": _mood_ctrl(emotion, n, intensity)}
+            run(SDK, str(wav), source, str(out_path), more)
             return time.time() - t
 
     try:

@@ -10,6 +10,7 @@ Runs locally (LivePortrait); nothing leaves this machine. The page shows this st
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import random
@@ -115,7 +116,7 @@ class Avatar:
             return self._render(*a, **k)
 
     @torch.no_grad()
-    def _render(self, yaw=0.0, pitch=0.0, roll=0.0, dx=0.0, dy=0.0, blink=0.0, mouth=0.0, seed=None, w=0.0, exp=None, exp_w=0.0) -> np.ndarray:
+    def _render(self, yaw=0.0, pitch=0.0, roll=0.0, dx=0.0, dy=0.0, blink=0.0, mouth=0.0, seed=None, w=0.0, exp=None, exp_w=0.0, emotion=None, emo_w=0.0) -> np.ndarray:
         """blink 0..1 (1 = closed), mouth 0..1 (1 = wide open); angles in degrees. Returns an RGB picture the size of the source photo."""
         info = {k: (v.clone() if isinstance(v, torch.Tensor) else v) for k, v in self.s_info.items()}
         info["yaw"] = info["yaw"] + yaw
@@ -129,6 +130,11 @@ class Avatar:
             info["pitch"] = info["pitch"] + w * seed["pitch"]
             info["roll"] = info["roll"] + w * seed["roll"]
             info["t"] = info["t"] + w * seed["t"]
+        if emotion and emo_w > 0.01:
+            e_delta, e_blink = emotion_table(self.s_info["exp"].device).get(emotion, (None, 0.0))
+            if e_delta is not None:
+                info["exp"] = info["exp"] + emo_w * e_delta
+                blink = max(blink, e_blink * emo_w)
         if exp is not None and exp_w > 0.01:  # a facial expression (smile, raised brows, ...) laid over the neutral face
             info["exp"] = info["exp"] + exp_w * exp
         x_d = self.w.transform_keypoint(info)
@@ -143,6 +149,28 @@ class Avatar:
         out = self.w.warp_decode(self.f_s, self.x_s, x_d)
         crop = self.w.parse_output(out["out"])[0]
         return paste_back(crop, self.crop_info["M_c2o"], self.src_rgb, self.mask)
+
+
+EXPR_FILE = HERE / "expressions.json"
+_expr_cache = {"mtime": 0.0, "table": {}}
+
+
+def emotion_table(device) -> dict:
+    """name -> (21x3 expression offset, extra eye-narrowing). Recipes live in expressions.json (the same for every face,
+    because they are offsets of the face model's own control points) and are re-read whenever the file changes."""
+    try:
+        mt = EXPR_FILE.stat().st_mtime
+    except OSError:
+        return {}
+    if mt != _expr_cache["mtime"]:
+        table = {}
+        for name, rec in json.loads(EXPR_FILE.read_text(encoding="utf-8")).items():
+            e = torch.zeros(1, 21, 3, device=device)
+            for kp, ax, amt in rec.get("exp", []):
+                e[0, int(kp), "xyz".index(ax)] += float(amt)
+            table[name] = (e, float(rec.get("blink", 0.0)))
+        _expr_cache.update(mtime=mt, table=table)
+    return _expr_cache["table"]
 
 
 REST_BLINK = -0.22  # < 0 = eyes slightly wider than in the photo; every animation is relative to this rest face
@@ -564,6 +592,53 @@ def main():
             return {"ok": True, "user": user, "seconds": round(load(user), 1)}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=404)
+
+    @app.get("/expr/recipes")
+    def expr_recipes(px: int = 260, cols: int = 4, w: float = 1.0):
+        """Every named emotion applied to the neutral face, side by side (to tune the recipes by eye)."""
+        av = state["avatar"]
+        pts = np.asarray(av.crop_info["lmk_crop"], np.float32)
+        x0, y0 = pts.min(0) - 25
+        x1, y1 = pts.max(0) + 25
+        x0, y0 = int(max(0, x0)), int(max(0, y0))
+        x1, y1 = int(min(av.src_rgb.shape[1], x1)), int(min(av.src_rgb.shape[0], y1))
+        names = ["neutral"] + list(emotion_table(av.w.device).keys())
+        tiles = []
+        for n in names:
+            img = av.render(emotion=n, emo_w=w)[y0:y1, x0:x1]
+            img = cv2.cvtColor(cv2.resize(img, (px, px)), cv2.COLOR_RGB2BGR)
+            cv2.putText(img, n, (6, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
+            tiles.append(img)
+        while len(tiles) % cols:
+            tiles.append(np.zeros_like(tiles[0]))
+        ok, buf = cv2.imencode(".jpg", np.vstack([np.hstack(tiles[i : i + cols]) for i in range(0, len(tiles), cols)]), [cv2.IMWRITE_JPEG_QUALITY, 88])
+        return Response(buf.tobytes(), media_type="image/jpeg")
+
+    @app.get("/expr/probe")
+    def expr_probe(amt: float = 0.05, px: int = 150, axes: str = "xy", lo: int = 0, hi: int = 21):
+        """Contact sheet: each of the 21 face control points nudged along each axis, both directions (face area only).
+        Used to learn what every control does so expressions can be composed from them."""
+        av = state["avatar"]
+        lm = av.crop_info["lmk_crop"]
+        pts = np.asarray(lm, np.float32)  # already in the photo's own coordinates
+        x0, y0 = pts.min(0) - 20
+        x1, y1 = pts.max(0) + 20
+        x0, y0 = int(max(0, x0)), int(max(0, y0))
+        x1, y1 = int(min(av.src_rgb.shape[1], x1)), int(min(av.src_rgb.shape[0], y1))
+        rows = []
+        for kp in range(lo, hi):
+            tiles = []
+            for ax in axes:
+                for sign in (-1, 1):
+                    e = torch.zeros_like(av.s_info["exp"])
+                    e[0, kp, "xyz".index(ax)] = sign * amt
+                    img = av.render(exp=e, exp_w=1.0)[y0:y1, x0:x1]
+                    img = cv2.cvtColor(cv2.resize(img, (px, px)), cv2.COLOR_RGB2BGR)
+                    cv2.putText(img, f"k{kp}{ax}{'+' if sign > 0 else '-'}", (3, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
+                    tiles.append(img)
+            rows.append(np.hstack(tiles))
+        ok, buf = cv2.imencode(".jpg", np.vstack(rows), [cv2.IMWRITE_JPEG_QUALITY, 85])
+        return Response(buf.tobytes(), media_type="image/jpeg")
 
     @app.post("/live")
     def live(on: int = 1):
