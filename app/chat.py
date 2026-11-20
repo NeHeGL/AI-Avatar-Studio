@@ -482,7 +482,68 @@ def _ditto_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> s
         return ""
 
 
-def _talk_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> str:
+_vinfo = threading.local()  # which engine made the video for the sentence this thread just rendered (shown on the page)
+COMFY_NEEDS_MB = 21000
+
+
+def _free_gpu_mb() -> int:
+    import subprocess
+
+    out = subprocess.run(["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"], capture_output=True, text=True).stdout
+    used, total = [int(v) for v in out.strip().splitlines()[0].split(",")]
+    return total - used
+
+
+def _comfy_video_url(canonical_name: str, wav_bytes: bytes) -> str:
+    """The same sentence rendered by ComfyUI InfiniteTalk (slow, more accurate lips). Needs ~20 GB of free GPU memory."""
+    from avatar_video import render_talk_video
+    from app.capture import _user_media_dir
+    from app.storage import MEDIA_DIR
+    from app.walkthrough import media_url
+
+    user_dir = MEDIA_DIR / _user_media_dir(canonical_name)
+    source = user_dir / "cinematic" / "source.jpg"
+    if not source.exists():
+        return ""
+    talk_dir = user_dir / "talk"
+    talk_dir.mkdir(parents=True, exist_ok=True)
+    tag = uuid.uuid4().hex[:10]
+    wav_path = talk_dir / f"reply_{tag}.wav"
+    out = talk_dir / f"reply_{tag}.mp4"
+    wav_path.write_bytes(wav_bytes)
+    try:
+        render_talk_video(source, wav_path, out, size=512, steps=4)
+    finally:
+        wav_path.unlink(missing_ok=True)
+    return media_url(str(out)) if out.exists() else ""
+
+
+def _talk_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "", engine: str = "") -> str:
+    """Video for this sentence, from the engine the person picked (checkbox): "ditto" (default) or "comfy" (InfiniteTalk).
+    What actually happened is left in _vinfo for the page to show; InfiniteTalk falls back to Ditto if the GPU has no room."""
+    t0 = time.time()
+    note = ""
+    used = "ditto"
+    url = ""
+    if engine == "comfy":
+        free = _free_gpu_mb()
+        if free >= COMFY_NEEDS_MB:
+            try:
+                url = _comfy_video_url(canonical_name, wav_bytes)
+                used = "comfy"
+            except Exception as exc:
+                _log("InfiniteTalk reply failed:", exc)
+                note = "InfiniteTalk failed, used Ditto"
+        else:
+            note = f"InfiniteTalk needs ~{COMFY_NEEDS_MB // 1000} GB of free GPU memory (only {free / 1000:.0f} GB free), used Ditto"
+    if not url:
+        used = "ditto"
+        url = _talk_video_url_ditto_or_other(canonical_name, wav_bytes, mood)
+    _vinfo.v = {"engine": used, "seconds": round(time.time() - t0, 1), "note": note}
+    return url
+
+
+def _talk_video_url_ditto_or_other(canonical_name: str, wav_bytes: bytes, mood: str = "") -> str:
     """Video for this sentence; empty string if disabled or on failure.
     AVATAR_REPLY_VIDEO=ditto -> local Ditto service (fast, photoreal); AVATAR_PHOTOREAL_VIDEO=1 -> InfiniteTalk (slow)."""
     if os.environ.get("AVATAR_REPLY_VIDEO", "").strip().lower() == "ditto":
@@ -548,7 +609,7 @@ def _nudge_prompt(n: int) -> str:
     return random.choice(_NUDGE_VARIANTS.get(min(max(int(n), 1), 7), _NUDGE_VARIANTS[7]))
 
 
-def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, say: str | None, token: str | None = None, nudge: int | None = None):
+def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, say: str | None, token: str | None = None, nudge: int | None = None, engine: str | None = None):
     if token != _owner["token"]:
         yield _ev(type="superseded")
         return
@@ -563,7 +624,8 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
                 type="say",
                 text=say,
                 audio=base64.b64encode(wav).decode(),
-                video_url=_talk_video_url(canonical_name, wav),
+                video_url=_talk_video_url(canonical_name, wav, "", engine or ""),
+                video_info=getattr(_vinfo, "v", None),
             )
             yield _ev(type="done")
             return
@@ -614,9 +676,10 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
             t_a = time.time()
             wav = _speak(sess, sent)
             t_b = time.time()
-            vid = _talk_video_url(canonical_name, wav, mood)
+            vid = _talk_video_url(canonical_name, wav, mood, engine or "")
+            vinfo = getattr(_vinfo, "v", None)
             _log(f"timing: sentence ready at +{t_a - t0:.1f}s | voice {t_b - t_a:.1f}s | video {time.time() - t_b:.1f}s | {sent[:40]!r}")
-            return sent, wav, vid, mood
+            return sent, wav, vid, mood, vinfo
 
         def produce():
             try:
@@ -639,11 +702,11 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
                 break
             if isinstance(item, Exception):
                 raise item
-            sent, wav, video_url, mood = item.result()  # in order: sentence 2 never overtakes sentence 1
+            sent, wav, video_url, mood, vinfo = item.result()  # in order: sentence 2 never overtakes sentence 1
             said.append(f"[{mood}] {sent}")  # the tags stay in the history so the model keeps using them
             sess.__dict__.setdefault("recent_said", []).append((time.time(), sent))
             del sess.recent_said[:-12]
-            yield _ev(type="say", text=sent, mood=mood, audio=base64.b64encode(wav).decode(), video_url=video_url)
+            yield _ev(type="say", text=sent, mood=mood, audio=base64.b64encode(wav).decode(), video_url=video_url, video_info=vinfo)
             _log(f"said {sent!r} (+{time.time() - t0:.1f}s)")
         if nudge:
             sess.history.append({"role": "user", "content": "(neither of you said anything for a while)"})

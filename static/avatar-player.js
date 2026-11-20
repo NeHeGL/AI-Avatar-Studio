@@ -1,4 +1,4 @@
-import { createVoiceChat } from "/static/voice-chat.js?v=14";
+import { createVoiceChat } from "/static/voice-chat.js?v=15";
 import { loadCinematic } from "/static/cinematic-clips.js?v=27";
 
 /**
@@ -31,6 +31,9 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
       <input id="chat-input" type="text" placeholder="…or type a message" />
       <button type="submit" class="btn-ghost">Send</button>
     </form>
+    <label class="avatar-note muted" style="display:block;text-align:center;margin:.4rem 0" title="Ditto: about 1.5x real time. InfiniteTalk (ComfyUI): about 20x real time and needs ~21 GB of free GPU memory, so it only works when little else is using the graphics card; otherwise Ditto is used and the line says so.">
+      <input type="checkbox" id="engine-comfy" /> Render replies with InfiniteTalk (ComfyUI) instead of Ditto — slow
+    </label>
     <audio id="avatar-audio" preload="auto"></audio>
     <div class="avatar-actions btn-row" style="justify-content: center; flex-wrap: wrap; gap: 0.5rem;">
       <button type="button" class="btn-primary" id="chat-mute" disabled>Mute mic</button>
@@ -102,7 +105,7 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
     URL.revokeObjectURL(audio.src);
   }
 
-  function addLine(who, text, replacePrevious = false) {
+  function addLine(who, text, replacePrevious = false, info = null) {
     if (replacePrevious) {
       const olds = logEl.querySelectorAll(".chat-line.you");
       olds[olds.length - 1]?.remove(); // the earlier part of what you said: now part of this longer line
@@ -110,6 +113,13 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
     const row = document.createElement("p");
     row.className = `chat-line ${who}`;
     row.textContent = (who === "you" ? "You: " : `${name}: `) + text;
+    if (info && info.engine) {
+      const tag = document.createElement("small");
+      tag.style.opacity = "0.6";
+      tag.style.marginLeft = "0.5em";
+      tag.textContent = `[${info.engine === "comfy" ? "InfiniteTalk" : "Ditto"} ${info.seconds}s${info.note ? " — " + info.note : ""}]`;
+      row.appendChild(tag);
+    }
     logEl.appendChild(row);
     logEl.scrollTop = logEl.scrollHeight;
   }
@@ -144,6 +154,7 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
         name: profile.canonical_name,
         token: j.token,
         playClip,
+        getEngine: () => (stageEl.querySelector("#engine-comfy")?.checked ? "comfy" : "ditto"),
         onSuperseded: () => {
           audio.pause();
           statusEl.textContent = "Chat moved to another window — close the extra avatar tabs, then reload this one.";

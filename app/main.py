@@ -381,6 +381,7 @@ class ChatTurnBody(BaseModel):
     text: str | None = None
     say: str | None = None
     token: str | None = None
+    engine: str | None = None  # "ditto" (default) or "comfy": which video engine renders the reply
     nudge: int | None = None  # 1..4: the model speaks up because the room went quiet
 
 
@@ -425,7 +426,7 @@ def api_chat_partial(body: ChatPartialBody) -> dict:
 def api_chat_turn(body: ChatTurnBody) -> StreamingResponse:
     """NDJSON stream: heard -> say (one per sentence, with WAV audio) -> done."""
     return StreamingResponse(
-        chat.turn_stream(body.canonical_name, body.audio_base64, body.text, body.say, body.token, body.nudge),
+        chat.turn_stream(body.canonical_name, body.audio_base64, body.text, body.say, body.token, body.nudge, body.engine),
         media_type="application/x-ndjson",
     )
 
