@@ -1,6 +1,5 @@
 # Keep the graph about the app's own code, not models, environments or captured media.
 ml/.venv/
-ml/ComfyUI/
 ml/out/
 ml/overrides.txt
 data/
@@ -32,3 +31,4 @@ backups_2026-11-17/
 
 *.onnx
 ml/realtime/models/
+labs/

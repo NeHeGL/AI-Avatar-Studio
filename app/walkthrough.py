@@ -85,7 +85,6 @@ def profile_summary(profile: UserProfile) -> dict:
         "avatar_face_url": media_url(face.path) if face else "",
         "avatar_voice_url": media_url(voice.path) if voice and voice.path else "",
         "avatar_voice_label": voice.label if voice else "",
-        "avatar_video_enabled": os.environ.get("AVATAR_PHOTOREAL_VIDEO", "").strip() == "1",
     }
 
 

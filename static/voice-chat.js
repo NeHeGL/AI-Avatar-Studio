@@ -109,7 +109,7 @@ export function createVoiceChat(o) {
       signal: turnCtl?.signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ canonical_name: o.name, token: o.token, engine: o.getEngine?.() || "", ...body }),
+      body: JSON.stringify({ canonical_name: o.name, token: o.token, ...body }),
     });
     if (!res.ok || !res.body) throw new Error(`server said ${res.status}`);
     const reader = res.body.getReader();
@@ -133,7 +133,7 @@ export function createVoiceChat(o) {
           chain = chain.then(async () => {
             if (stopped) return null;
             voiceOut = true;
-            o.onLine("avatar", ev.text, false, ev.video_info); // the words appear when they start being spoken, not when they were written
+            o.onLine("avatar", ev.text); // the words appear when they start being spoken, not when they were written
             try {
               return await o.playClip(blob, ev.video_url || "");
             } finally {

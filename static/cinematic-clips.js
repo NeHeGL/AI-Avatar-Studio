@@ -347,8 +347,11 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
         setTimeout(res, (c.dur + 1) * 1000);
       });
     } catch (e) {
-      bankFails += 1;
-      note(`Waiting animation problem (${e?.name || e}); ${bankFails}/3`);
+      // AbortError = the browser cancelled this clip because another video took over (a reply, a clip): not a failure
+      if (e?.name !== "AbortError") {
+        bankFails += 1;
+        note(`Waiting animation problem (${e?.name || e}); ${bankFails}/3`);
+      }
     }
     bankPlaying = false;
     lastBankEnd = Date.now();
