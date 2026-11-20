@@ -126,7 +126,7 @@ export function createVoiceChat(o) {
               return await o.playClip(blob, ev.video_url || "");
             } finally {
               voiceOut = false;
-              voiceOutUntil = performance.now() + 700; // its own voice fades out of the room
+              voiceOutUntil = performance.now() + 1100; // its own voice fades out of the room
             }
           });
         } else {
@@ -181,9 +181,17 @@ export function createVoiceChat(o) {
     for (let i = 0; i < x.length; i++) sum += x[i] * x[i];
     const rms = Math.sqrt(sum / x.length);
     const ms = (x.length / ctx.sampleRate) * 1000;
-    const ownVoice = busy && (voiceOut || performance.now() < voiceOutUntil);
-    const threshold = Math.max(0.01, floor * 3.2) * (ownVoice ? 3.5 : 1); // never mistake its own voice for you
+    const ownVoice = voiceOut || performance.now() < voiceOutUntil;
+    const threshold = Math.max(0.01, floor * 3.2);
     o.onLevel(rms, threshold);
+    if (ownVoice) {
+      // its own voice is coming out of the speakers: record nothing (it would hear itself and answer itself)
+      speaking = false;
+      chunks = [];
+      preroll = [];
+      loud = 0;
+      return;
+    }
     if (muted || (!busy && performance.now() < resumeAt)) {
       speaking = false;
       chunks = [];

@@ -1,4 +1,4 @@
-import { createVoiceChat } from "/static/voice-chat.js?v=4";
+import { createVoiceChat } from "/static/voice-chat.js?v=5";
 import { loadCinematic } from "/static/cinematic-clips.js?v=26";
 
 /**
@@ -17,7 +17,7 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
   // The first picture on screen is the person's prepared photo (the rest frame once their animations exist), never the raw scan
   // photo, so nothing in a different crop flashes up before the avatar loads.
   const mediaBase = (stillPhoto.match(/^(.*\/media\/[^/]+)\//) || [])[1] || "";
-  const firstPic = mediaBase ? `${mediaBase}/cinematic/idle_bank/rest.jpg` : stillPhoto;
+  const firstPic = mediaBase ? `${mediaBase}/cinematic/idle_bank/rest.jpg?t=${Date.now()}` : stillPhoto;
 
   stageEl.innerHTML = `
     <div class="avatar-figure mesh has-face" id="avatar">

@@ -477,7 +477,7 @@ def build_bank(av: "Avatar", folder: Path, still_current, quiet=lambda: True, no
         done, stamp = old["clips"], old.get("source_sha")
     except Exception:
         done, stamp = [], None
-    done = [c for c in done if (folder / c["file"]).exists()]
+    done = [c for c in done if (folder / c["file"]).exists() and (folder / c["file"]).stat().st_size > 5000]
     # Every animation must come from the SAME photo as the rest frame (and the intro). The set records which photo it was made
     # from; clips made from any other photo are thrown away instead of being mixed in (that is what made the picture jump).
     try:
@@ -506,7 +506,7 @@ def build_bank(av: "Avatar", folder: Path, still_current, quiet=lambda: True, no
         done = keep
     for c in done:  # clips made before the think list grew
         c["think"] = c["kind"] in THINK_KINDS
-        if c.get("webm") and not (folder / c["webm"]).exists():
+        if c.get("webm") and (not (folder / c["webm"]).exists() or (folder / c["webm"]).stat().st_size < 5000):
             c.pop("webm")
 
     def purge():  # goofy faces expire

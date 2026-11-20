@@ -223,6 +223,25 @@ def _split_mood(sent: str, last: str = "neutral") -> tuple[str, str]:
     return text, mood
 
 
+def _is_echo(sess, heard: str) -> bool:
+    """True if what the microphone 'heard' is mostly the avatar's own recent speech coming back through the speakers."""
+    import difflib
+
+    now = time.time()
+    recent = [t for ts, t in getattr(sess, "recent_said", []) if now - ts < 90]
+    words = lambda s: re.sub(r"[^a-z0-9' ]+", " ", s.lower()).split()  # noqa: E731
+    h = words(heard)
+    if len(h) < 3 or not recent:
+        return False
+    for r in recent:
+        sm = difflib.SequenceMatcher(None, h, words(r), autojunk=False)
+        matched = sum(b.size for b in sm.get_matching_blocks())
+        longest = max((b.size for b in sm.get_matching_blocks()), default=0)
+        if matched / len(h) >= 0.85 and longest >= 3:
+            return True
+    return False
+
+
 def _clean(text: str) -> str:
     text = re.sub(r"\((?:note|\w+)[^)]*\)", "", text, flags=re.I)  # stray "(...)" asides
     text = re.sub(r"\bNote:.*$", "", text, flags=re.I)
@@ -518,6 +537,11 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
                 yield _ev(type="ignored", reason="noise", text=text)
                 yield _ev(type="done")
                 return
+            if _is_echo(sess, text):
+                _log(f"ignored an echo of the avatar's own voice: {text!r}")
+                yield _ev(type="ignored", reason="echo", text=text)
+                yield _ev(type="done")
+                return
         if not text and not nudge:
             yield _ev(type="done")
             return
@@ -563,6 +587,8 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
                 raise item
             sent, wav, video_url, mood = item.result()  # in order: sentence 2 never overtakes sentence 1
             said.append(f"[{mood}] {sent}")  # the tags stay in the history so the model keeps using them
+            sess.__dict__.setdefault("recent_said", []).append((time.time(), sent))
+            del sess.recent_said[:-12]
             yield _ev(type="say", text=sent, mood=mood, audio=base64.b64encode(wav).decode(), video_url=video_url)
             _log(f"said {sent!r} (+{time.time() - t0:.1f}s)")
         if nudge:
