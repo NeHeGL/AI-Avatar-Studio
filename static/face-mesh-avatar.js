@@ -611,7 +611,7 @@ export function createMeshPuppet(canvas, mesh) {
   for (let n = 0; n < N; n++) {
     vxN[n] = pts[n].x / SCALE;
     vyN[n] = pts[n].y / SCALE;
-    vzN[n] = (pts[n].z * 0.6) / SCALE; // flatter than MediaPipe's raw depth
+    vzN[n] = (pts[n].z * 0.35) / SCALE; // much flatter than MediaPipe's raw depth: a rough depth map bends the jaw when the head turns
   }
 
   function deform(pose) {

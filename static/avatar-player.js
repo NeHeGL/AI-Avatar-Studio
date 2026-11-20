@@ -1,4 +1,4 @@
-import { buildMeshFromScans, createMeshPuppet, meshFromLandmarks } from "/static/face-mesh-avatar.js?v=18";
+import { buildMeshFromScans, createMeshPuppet, meshFromLandmarks } from "/static/face-mesh-avatar.js?v=19";
 import { createVoiceChat } from "/static/voice-chat.js?v=2";
 
 
@@ -203,9 +203,10 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
       blinkR: b * (0.96 + 0.04 * Math.sin(t * 7)),
       brow: 0.15 * Math.sin(t * 0.7) + 0.55 * s,
       // Head turns in real 3D: slow look-around, livelier while talking.
-      yaw: 0.16 * Math.sin(t * 0.43) + 0.05 * Math.sin(t * 1.1 + 1) + s * 0.1 * Math.sin(t * 2.3),
-      pitch: 0.035 * Math.sin(t * 0.61 + 0.7) + 0.012 * Math.sin(t * 1.3) + s * 0.07 * Math.sin(t * 3.1 + 0.5) - mouth.open * 0.03,
-      roll: 0.03 * Math.sin(t * 0.37) + s * 0.04 * Math.sin(t * 1.7),
+      // Kept small on purpose: this warps ONE flat photo over a rough depth map, so anything past a few degrees bends the jaw and nose.
+      yaw: 0.045 * Math.sin(t * 0.43) + 0.015 * Math.sin(t * 1.1 + 1) + s * 0.03 * Math.sin(t * 2.3),
+      pitch: 0.012 * Math.sin(t * 0.61 + 0.7) + 0.005 * Math.sin(t * 1.3) + s * 0.02 * Math.sin(t * 3.1 + 0.5) - mouth.open * 0.01,
+      roll: 0.012 * Math.sin(t * 0.37) + s * 0.015 * Math.sin(t * 1.7),
       dx: 3.0 * Math.sin(t * 0.5),
       dy: 2.0 * Math.sin(t * 0.8) + s * 2,
       zoom: 1.0 + 0.004 * Math.sin(t * 1.3),
