@@ -863,10 +863,15 @@ body.cinematic .screen-root {
   color: var(--text);
 }
 
-/* Name field doubles as a dropdown of existing users (native datalist arrow) */
-.step-combo::-webkit-calendar-picker-indicator {
-  opacity: 1;
+/* Profile drop-down on the first screen */
+.step-select {
   cursor: pointer;
+  text-align-last: center;
+}
+
+.step-select option {
+  background: var(--surface);
+  color: var(--text);
 }
 
 .step-actions {

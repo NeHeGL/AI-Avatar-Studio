@@ -228,24 +228,53 @@ export async function renderNameStep(root, onSubmit) {
   try {
     users = (await (await fetch("/api/users")).json()).users || [];
   } catch (_) {}
+  const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+  const hasProfiles = users.length > 0;
+  // With profiles: a real drop-down (pick one, or choose "New profile..." to type a name). Without: just the name box.
   transition(
     root,
     `
     <section class="step-card step-card--center">
-      <p class="step-eyebrow">Account Management</p>
-      <h2 class="step-title">What's your name?</h2>
-      <input type="text" class="step-input step-combo" id="name-input" list="name-users" placeholder="Pick your name from the list, or type a new one" autocomplete="off" />
-      <datalist id="name-users">${users.map((u) => `<option value="${u.replace(/"/g, "&quot;")}"></option>`).join("")}</datalist>
+      <p class="step-eyebrow">Profile Management</p>
+      <h2 class="step-title">${hasProfiles ? "Select a profile" : "What's your name?"}</h2>
+      ${
+        hasProfiles
+          ? `<select class="step-input step-select" id="profile-select">
+        <option value="" disabled selected>Select a profile…</option>
+        ${users.map((u) => `<option value="${esc(u)}">${esc(u)}</option>`).join("")}
+        <option value="__new__">＋ New profile…</option>
+      </select>`
+          : ""
+      }
+      <input type="text" class="step-input" id="name-input" placeholder="Type your full name" autocomplete="off" ${hasProfiles ? "hidden" : ""} />
       <div class="step-actions step-actions--solo">
         <button type="button" class="btn-primary" id="name-ok">OK</button>
       </div>
     </section>`
   );
   const input = document.getElementById("name-input");
-  input.focus();
-  const submit = () => onSubmit(input.value.trim());
+  const select = document.getElementById("profile-select");
+  const chosen = () => (select && select.value !== "__new__" ? select.value : input.value.trim());
+  const submit = () => {
+    const name = chosen();
+    if (name) onSubmit(name);
+    else (select && select.value !== "__new__" ? select : input).focus();
+  };
+  if (select) {
+    select.focus();
+    select.addEventListener("change", () => {
+      const makingNew = select.value === "__new__";
+      input.hidden = !makingNew;
+      if (makingNew) input.focus();
+    });
+  } else {
+    input.focus();
+  }
   document.getElementById("name-ok").onclick = submit;
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") submit();
+  });
+  select?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && select.value) submit();
   });
 }
