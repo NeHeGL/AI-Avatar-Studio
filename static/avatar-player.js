@@ -1,4 +1,4 @@
-import { createVoiceChat } from "/static/voice-chat.js?v=5";
+import { createVoiceChat } from "/static/voice-chat.js?v=6";
 import { loadCinematic } from "/static/cinematic-clips.js?v=26";
 
 /**
@@ -159,6 +159,7 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
       cinema = await cinemaReady;
       if (!cinema) statusEl.textContent = "No photo-real face for this person yet (showing the still photo); the voice chat still works.";
       if (!(cinema && (await playCinematic("greeting")))) await chat.say(`Hello, I'm ${j.display_name || name}.`);
+      chat.touch?.(); // the silence clock starts after the greeting, not while the models were loading
     } catch (e) {
       console.error(e);
       statusEl.textContent =

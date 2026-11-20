@@ -55,7 +55,7 @@ class Avatar:
         self.glasses = bool(opts.get("glasses"))
         self.rest_blink = 0.0 if self.glasses else REST_BLINK
         self.blink_scale = 0.3 if self.glasses else 1.0
-        self.lock = threading.RLock()
+        self.lock = RENDER_LOCK  # one lock for every person: the graphics card takes turns between the live face and the builders
         self.w = pipe.live_portrait_wrapper
         crop = CropConfig()
         bgr = cv2.imread(str(photo))
@@ -188,6 +188,7 @@ def emotion_table(device) -> dict:
     return _expr_cache["table"]
 
 
+RENDER_LOCK = threading.RLock()
 REST_BLINK = -0.22  # < 0 = eyes slightly wider than in the photo; every animation is relative to this rest face
 
 MATTE_MODEL = HERE / "models" / "u2net_human_seg.onnx"
@@ -456,7 +457,17 @@ def _with_alpha(frame_bgr: np.ndarray, alpha: np.ndarray) -> bytes:
     return np.ascontiguousarray(np.dstack([frame_bgr, (alpha * 255).astype(np.uint8)])).tobytes()
 
 
-def build_bank(av: "Avatar", folder: Path, still_current, quiet=lambda: True, note=lambda m: None) -> None:
+_BANK_LOCKS: dict = {}
+
+
+def build_bank(av: "Avatar", folder: Path, still_current, quiet=lambda: True, note=lambda m: None, budget=None, cap=None, goofy=True) -> None:
+    """Only one builder works on a person's animation set at a time; a second one waits its turn."""
+    lock = _BANK_LOCKS.setdefault(str(folder), threading.Lock())
+    with lock:
+        _build_bank(av, folder, still_current, quiet, note, budget, cap, goofy)
+
+
+def _build_bank(av: "Avatar", folder: Path, still_current, quiet, note, budget, cap, goofy) -> None:
     """Keep inventing new waiting animations whenever nothing else is going on, and save them (one per file) so later
     sessions have them ready. Each animation is saved twice: the normal video, and a transparent twin whose cut-out of the
     person is worked out for every single frame, so a replaced background follows the head when it tilts or moves.
@@ -566,7 +577,11 @@ def build_bank(av: "Avatar", folder: Path, still_current, quiet=lambda: True, no
     recent: list[str] = []
     kinds, weights = list(BANK_KINDS), list(BANK_KINDS.values())
     serial = max([int(c["id"].rsplit("_", 1)[-1]) for c in done if c["id"].rsplit("_", 1)[-1].isdigit()] + [0])
+    made = 0
+    limit = cap or MAX_BANK
     while True:
+        if budget is not None and made >= budget:
+            return
         if not still_current():
             return
         while not quiet():  # a chat is going on: leave the graphics card to it
@@ -579,10 +594,12 @@ def build_bank(av: "Avatar", folder: Path, still_current, quiet=lambda: True, no
         pool = [
             (k, wt) for k, wt in zip(kinds, weights)
             if k not in recent[-3:]  # never the same thing twice in a row
-            and (permanent < MAX_BANK or k in GOOFY_KINDS)
-            and (k not in GOOFY_KINDS or goofy_now < 3)  # only a few goofy faces exist at any time
+            and (permanent < limit or (goofy and k in GOOFY_KINDS))
+            and (k not in GOOFY_KINDS or (goofy and goofy_now < 3))  # only a few goofy faces exist at any time
         ]
         if not pool:
+            if cap:  # a limited builder (the librarian) is simply finished
+                return
             time.sleep(30)
             continue
         kind = rnd.choices([k for k, _ in pool], [wt for _, wt in pool])[0]
@@ -624,6 +641,7 @@ def build_bank(av: "Avatar", folder: Path, still_current, quiet=lambda: True, no
             entry["expires"] = time.time() + GOOFY_LIFE_SEC
         done.append(entry)
         save()
+        made += 1
         print(f"bank: {cid} ({len(done)} clips)", flush=True)
         note(f"idle ({len(done)} clips)")
 
@@ -799,6 +817,51 @@ def main():
                 nxt = time.time()
 
     threading.Thread(target=loop, daemon=True).start()
+
+    LIBRARY_TARGET = 40  # animations per person that the librarian keeps ready in advance
+
+    def librarian():
+        """In quiet moments, build waiting animations for EVERY person who has a prepared photo, a few at a time, so they exist
+        before anyone opens a profile. The person currently on screen is handled by their own builder (which keeps going)."""
+        import json as _json
+
+        time.sleep(15)  # let the servers settle first
+        avatars: dict = {}
+        skip_until: dict = {}
+        while True:
+            try:
+                media = ROOT / "data" / "media"
+                for src in sorted(media.glob("*/cinematic/source.jpg")):
+                    user = src.parent.parent.name
+                    if user == state["user"] or time.time() < skip_until.get(user, 0):
+                        continue
+                    folder = src.parent / "idle_bank"
+                    try:
+                        have = len([c for c in _json.loads((folder / "manifest.json").read_text(encoding="utf-8-sig"))["clips"] if not c.get("ephemeral")])
+                    except Exception:
+                        have = 0
+                    if have >= LIBRARY_TARGET:
+                        continue
+                    while time.time() < state["busy_until"]:
+                        time.sleep(2)
+                    key = (user, src.stat().st_mtime)
+                    if user not in avatars or avatars[user][0] != key:
+                        try:
+                            avatars[user] = (key, Avatar(src, pipe))
+                        except Exception as exc:  # no face found, etc.: try again much later
+                            print(f"librarian: cannot use {user}: {exc}", flush=True)
+                            skip_until[user] = time.time() + 1800
+                            continue
+                    print(f"librarian: {user} has {have}, building more", flush=True)
+                    build_bank(
+                        avatars[user][1], folder, lambda u=user: state["user"] != u,
+                        quiet=lambda: time.time() > state["busy_until"], note=lambda m: None, budget=6, cap=LIBRARY_TARGET, goofy=False,
+                    )
+            except Exception as exc:
+                print("librarian error:", exc, flush=True)
+            time.sleep(20)
+
+    threading.Thread(target=librarian, daemon=True).start()
     app = FastAPI()
     app.add_middleware(
         CORSMiddleware,

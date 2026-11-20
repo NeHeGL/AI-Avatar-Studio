@@ -83,13 +83,13 @@ export function createVoiceChat(o) {
   let speechMs = 0;
   // Speaking up on its own: if the room stays quiet it says something now and then, less and less often,
   // and after the last attempt it gets bored and stays quiet until the person says something again.
-  const quietGaps = o.quietGapsSec || [35, 75, 130, 210]; // seconds of silence before each attempt (+-20%)
+  const quietGaps = o.quietGapsSec || [12, 24, 40, 70, 115, 190, 320]; // seconds of silence before each attempt (+-25%), then it gets bored
   let nudges = 0;
   let lastActive = performance.now();
   let nudgeTimer = 0;
   function maybeNudge() {
     if (stopped || busy || muted || speaking || nudges >= quietGaps.length) return;
-    if (performance.now() - lastActive < quietGaps[nudges] * 1000 * (0.8 + Math.random() * 0.4)) return;
+    if (performance.now() - lastActive < quietGaps[nudges] * 1000 * (0.75 + Math.random() * 0.5)) return;
     nudges += 1;
     void runTurn({ nudge: nudges });
   }
@@ -138,14 +138,19 @@ export function createVoiceChat(o) {
   }
 
   async function runTurn(body) {
-    if (!body.nudge) nudges = 0; // the person (or a scripted line) broke the silence
+    let engaged = Boolean(body.text); // something typed counts; heard speech counts once it has been accepted (see below)
+    if (engaged) nudges = 0;
     busy = true;
     o.onStatus("Thinking…");
     let failed = "";
     try {
       await post(body, (ev) => {
         if (ev.type === "superseded") superseded = true;
-        if (ev.type === "heard") o.onLine("you", ev.text);
+        if (ev.type === "heard") {
+          engaged = true;
+          nudges = 0; // you really said something
+          o.onLine("you", ev.text);
+        }
         if (ev.type === "error") failed = ev.message;
       });
     } catch (e) {
@@ -159,7 +164,7 @@ export function createVoiceChat(o) {
     if (failed) o.onStatus(`Problem: ${failed}`);
     resumeAt = performance.now() + 600; // let the room go quiet before listening again
     busy = false;
-    lastActive = performance.now();
+    if (engaged || body.nudge || body.say) lastActive = performance.now(); // room noise that was ignored does not restart the silence clock
     if (pending.length && !failed && !stopped && !muted) {
       const got = pending;
       pending = [];
@@ -205,8 +210,6 @@ export function createVoiceChat(o) {
       loud = rms > threshold ? loud + 1 : 0;
       if (loud >= 2) {
         speaking = true;
-        nudges = 0;
-        lastActive = performance.now();
         chunks = [...preroll];
         speechMs = 0;
         quietMs = 0;
@@ -255,6 +258,11 @@ export function createVoiceChat(o) {
       nudgeTimer = setInterval(maybeNudge, 1000);
     },
     say: (text) => runTurn({ say: text }),
+    /** Restart the silence clock (after the greeting, say). */
+    touch() {
+      lastActive = performance.now();
+      nudges = 0;
+    },
     sendText: (text) => runTurn({ text }),
     setMuted(m) {
       muted = m;

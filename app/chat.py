@@ -488,12 +488,36 @@ def _ev(**kw) -> bytes:
     return (json.dumps(kw) + "\n").encode()
 
 
-_NUDGE_PROMPTS = {
-    1: "(You and the other person have been sitting quietly for a little while. Say ONE short, natural thing to fill the silence, like a friend in the room would: check whether they are still there (for example 'Hello? Anyone there?' or 'You still with me?'), or a casual remark, or a light question. Under 15 words. Do not mention this note.)",
-    2: "(Still quiet. Say something short and idle: wonder aloud where they went, think out loud, or notice something small. Under 12 words. Do not repeat yourself. Do not mention this note.)",
-    3: "(It has been quiet for a good while and you are starting to get bored. Mutter something short, maybe say you are bored. Under 12 words. Do not mention this note.)",
-    4: "(A very long silence. You are bored and giving up for now: say a short, trailing-off remark. Under 10 words. Do not mention this note.)",
+_NUDGE_VARIANTS = {
+    1: [  # a friend in the room starts a conversation
+        "(You and the other person have been sitting quietly for a moment. Start a conversation like a friend would: ask a fun, curious question about their day, something they like, or what is on their mind. One or two short sentences. Do not mention this note.)",
+        "(It has gone quiet. Check in naturally, for example 'Hello? Anyone there?' or 'You still with me?', and add a light question. Under 15 words. Do not mention this note.)",
+        "(It has gone quiet. Share one small, interesting thought or fun fact in a sentence and ask what they think. Under 25 words. Do not mention this note.)",
+        "(It has gone quiet. Make a playful remark about the silence and invite them to talk. Under 15 words. Do not mention this note.)",
+    ],
+    2: [
+        "(Still quiet. Gently tease them or wonder aloud where they went, then ask them something easy. Under 15 words. Do not repeat yourself. Do not mention this note.)",
+        "(Still quiet. Pose a quirky 'would you rather' or 'what if' question to get them talking. Under 20 words. Do not mention this note.)",
+        "(Still quiet. Say something idle, like thinking out loud or noticing something small, and ask them a question about it. Under 15 words. Do not mention this note.)",
+    ],
+    3: [
+        "(Quiet for a while. Offer to do something together: a quick game (20 questions, a riddle), or a short story if they want one, and ask which. Under 20 words. Do not mention this note.)",
+        "(Quiet for a while. Ask them what they have been up to today, or what they are working on. Under 15 words. Do not mention this note.)",
+    ],
+    4: [
+        "(Quiet for a good while. Think out loud about something random and slightly funny, then wonder if they are listening. Under 20 words. Do not mention this note.)",
+        "(Quiet for a good while. Ask if they are still there, in your own way. Under 12 words. Do not mention this note.)",
+    ],
+    5: ["(A long quiet. You are starting to get bored. Mutter something short, maybe say you are bored. Under 12 words. Do not mention this note.)"],
+    6: ["(A very long quiet. You are properly bored now: a short, wry remark. Under 12 words. Do not mention this note.)"],
+    7: ["(A very long silence. You are giving up for now: say a short, trailing-off remark. Under 10 words. Do not mention this note.)"],
 }
+
+
+def _nudge_prompt(n: int) -> str:
+    import random
+
+    return random.choice(_NUDGE_VARIANTS.get(min(max(int(n), 1), 7), _NUDGE_VARIANTS[7]))
 
 
 def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, say: str | None, token: str | None = None, nudge: int | None = None):
@@ -547,7 +571,7 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
             return
         if nudge:
             # a private note to the model; it is not shown as something the person said
-            llm_history = sess.history + [{"role": "user", "content": _NUDGE_PROMPTS.get(int(nudge), _NUDGE_PROMPTS[4])}]
+            llm_history = sess.history + [{"role": "user", "content": _nudge_prompt(nudge)}]
         else:
             yield _ev(type="heard", text=text)
             sess.history.append({"role": "user", "content": text})
