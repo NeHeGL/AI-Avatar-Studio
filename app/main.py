@@ -351,6 +351,26 @@ def api_body_frames(body: ScanFramesBody) -> dict:
     return capture.ingest_body_frames(body.canonical_name, body.frames)
 
 
+class ReplyDoneBody(BaseModel):
+    video_url: str
+
+
+@app.post("/api/chat/reply-played")
+def api_reply_played(body: ReplyDoneBody) -> dict:
+    """A reply video has been played: delete it (only generated reply_*.mp4 files inside a talk folder)."""
+    from pathlib import Path
+
+    data_root = (Path(__file__).resolve().parent.parent / "data").resolve()
+    rel = body.video_url.split("?", 1)[0]
+    if not rel.startswith("/data/"):
+        return {"ok": False}
+    path = (data_root / rel[len("/data/"):]).resolve()
+    if data_root in path.parents and path.parent.name == "talk" and path.name.startswith("reply_") and path.suffix == ".mp4":
+        path.unlink(missing_ok=True)
+        return {"ok": True}
+    return {"ok": False}
+
+
 class ChatStartBody(BaseModel):
     canonical_name: str
 

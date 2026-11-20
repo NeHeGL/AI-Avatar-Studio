@@ -57,7 +57,16 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
     await cinema?.whenIdle();
     if (cinema && videoUrl) {
       statusEl.textContent = "Speaking…";
-      if (await cinema.playReply(videoUrl, blob)) return;
+      const played = await cinema.playReply(videoUrl, blob);
+      // a reply video is single-use: once it has played, the server throws it away
+      setTimeout(() => {
+        fetch("/api/chat/reply-played", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ video_url: videoUrl }),
+        }).catch(() => {});
+      }, 3000);
+      if (played) return;
     }
     cinema?.release(); // no video for this sentence: back to the live idle face while the voice plays
     audio.src = URL.createObjectURL(blob);
