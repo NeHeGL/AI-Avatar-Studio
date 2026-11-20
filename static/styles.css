@@ -1027,11 +1027,11 @@ body.cinematic .orbit-card.face-scan-card { background: transparent; border: non
 /* signature, bottom right of every screen */
 .credit {
   position: fixed;
-  right: 14px;
-  bottom: 10px;
-  font-size: 0.75rem;
-  color: var(--muted);
-  opacity: 0.6;
+  right: 18px;
+  bottom: 12px;
+  font-size: 0.9rem;
+  color: #a9b4c9;
+  opacity: 0.9;
   pointer-events: none;
   user-select: none;
   z-index: 5;
