@@ -382,7 +382,7 @@ class Clip:
         elif kind == "glance_back":  # looks off to one side, comes back to the screen, looks once more
             D = A(4.0, 5.5)
             k = [(0,), (D * .2, sg * A(5, 8), A(-1, 1)), (D * .42, sg * A(5, 8), A(-1, 1)), (D * .6, 0, A(.3, 1.2), 0, 0, 0, 1), (D * .78, sg * A(2, 4), 0), (D,)]
-        elif kind in ("wink", "brow_up", "pucker", "stare"):  # a quick gag: in, hold a beat, out
+        elif kind in ("wink", "brow_up"):  # a quick gag: in, hold a beat, out
             D = A(1.9, 2.8)
             tilt = sg * A(1.5, 3.5)
             k = [(0,), (D * .3, sg * A(.5, 2), A(0, 1.5), tilt, 0, 0, 1), (D * .62, sg * A(.5, 2), A(0, 1.2), tilt, 0, 0, 1), (D,)]
@@ -416,7 +416,7 @@ class Clip:
             x = t / D
             hold = 1.0 if 0.22 < x < 0.6 else (smooth(x / 0.22) if x <= 0.22 else smooth((0.82 - x) / 0.22))
             hold = max(0.0, hold)
-            p.update(mouth=0.85 * hold, blink=0.65 * hold, pitch=3.0 * hold, roll=0.8 * hold)
+            p.update(mouth=0.28 * hold, blink=0.6 * hold, pitch=3.0 * hold, roll=0.8 * hold)
         else:
             tt = min(t, D)
             yaw, pitch, roll, squint, mouth, mood = (hermite(c, tt) for c in self.keys)
@@ -436,8 +436,8 @@ class Clip:
 
 BANK_KINDS = {"breathe": 6, "look_around": 3, "look_up": 3, "look_down": 2, "reading": 2, "tilt": 2, "sigh": 2, "double_take": 1.5,
               "ponder": 3, "think": 3, "curious": 3, "perk": 2, "smile": 3, "glance_back": 2.5, "yawn": 0.8,
-              "wink": 0.5, "brow_up": 0.5, "pucker": 0.35, "stare": 0.35}
-GOOFY_KINDS = ("wink", "brow_up", "pucker", "stare")
+              "wink": 0.5, "brow_up": 0.5}
+GOOFY_KINDS = ("wink", "brow_up")
 GOOFY_LIFE_SEC = 25 * 60  # goofy faces are made at random and expire; they are never a permanent part of the bank
 THINK_KINDS = ("think", "ponder", "curious", "tilt", "look_up", "reading", "glance_back")
 MAX_BANK = 160  # per person: new ones keep being invented until there are this many
@@ -687,7 +687,7 @@ class Idle:
             else:
                 open_ = bump(min(1.0, x / 0.82)) if x < 0.82 else 0.0  # rises, holds, closes
                 hold = 1.0 if 0.22 < x < 0.6 else (smooth(x / 0.22) if x <= 0.22 else smooth((0.82 - x) / 0.22))
-                mouth = 0.85 * max(0.0, hold)
+                mouth = 0.28 * max(0.0, hold)
                 blink = max(blink, 0.65 * max(0.0, hold))
                 pitch += 3.0 * max(0.0, hold)
                 roll += 0.8 * max(0.0, hold)
