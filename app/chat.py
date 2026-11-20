@@ -426,6 +426,9 @@ def _ditto_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> s
 
         user_dir = MEDIA_DIR / _user_media_dir(canonical_name)
         source = user_dir / "cinematic" / "source.jpg"
+        rest = user_dir / "cinematic" / "idle_bank" / "rest.jpg"
+        if rest.exists():  # the animations all start and end on this frame: talking starts on it too, so the cut is invisible
+            source = rest
         if not source.exists():
             return ""
         talk_dir = user_dir / "talk"

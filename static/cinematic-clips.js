@@ -287,7 +287,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     restWaiters = [];
     for (const f of w) f();
   };
-  const whenRest = (maxMs = 4500) =>
+  const whenRest = (maxMs = 14000) => // wait for the animation on screen to FINISH (the longest are about 7 s); the cap only guards against a stuck one
     bankPlaying ? new Promise((res) => {
       restWaiters.push(res);
       setTimeout(res, maxMs);

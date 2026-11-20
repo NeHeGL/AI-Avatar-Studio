@@ -579,10 +579,17 @@ def _build_bank(av: "Avatar", folder: Path, still_current, quiet, note, budget, 
     serial = max([int(c["id"].rsplit("_", 1)[-1]) for c in done if c["id"].rsplit("_", 1)[-1].isdigit()] + [0])
     made = 0
     limit = cap or MAX_BANK
+
+    def photo_changed() -> bool:  # the photo this set is made from was replaced: stop at once (the next builder purges and restarts)
+        try:
+            return hashlib.sha1((folder.parent / "source.jpg").read_bytes()).hexdigest()[:12] != sha
+        except Exception:
+            return True
+
     while True:
         if budget is not None and made >= budget:
             return
-        if not still_current():
+        if not still_current() or photo_changed():
             return
         while not quiet():  # a chat is going on: leave the graphics card to it
             note("paused: a conversation is going on")
@@ -615,7 +622,7 @@ def _build_bank(av: "Avatar", folder: Path, still_current, quiet, note, budget, 
         aborted = False
         prev = None
         for f in range(clip.frames + 1):  # the last frame is the rest frame again
-            if f % 10 == 0 and not quiet():  # a chat started mid-clip: drop it, try again later
+            if f % 10 == 0 and (not quiet() or photo_changed()):  # a chat started (or the photo changed) mid-clip: drop it
                 aborted = True
                 break
             frame = av.render(**clip.at(f / Clip.FPS))
@@ -828,12 +835,27 @@ def main():
         time.sleep(15)  # let the servers settle first
         avatars: dict = {}
         skip_until: dict = {}
+        seen_sig: dict = {}
         while True:
             try:
                 media = ROOT / "data" / "media"
                 for src in sorted(media.glob("*/cinematic/source.jpg")):
                     user = src.parent.parent.name
-                    if user == state["user"] or time.time() < skip_until.get(user, 0):
+                    try:
+                        sig = src.stat().st_mtime
+                    except OSError:
+                        continue
+                    if user == state["user"]:
+                        if seen_sig.get(user) not in (None, sig):  # the person on screen got a new photo: reload them from it
+                            print(f"librarian: {user} has a new photo; reloading", flush=True)
+                            try:
+                                load(user)
+                            except Exception as exc:
+                                print("reload failed:", exc, flush=True)
+                        seen_sig[user] = sig
+                        continue
+                    seen_sig[user] = sig
+                    if time.time() < skip_until.get(user, 0):
                         continue
                     folder = src.parent / "idle_bank"
                     try:

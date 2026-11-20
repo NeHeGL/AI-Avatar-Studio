@@ -130,6 +130,12 @@ def ingest_scan_frames(canonical_name: str, frames: list[dict]) -> dict:
 
         profile = reconcile_profile(profile)
         save_draft(profile)
+        try:  # a rescan means a new photo: everything made from the old one is purged
+            from app.photoreal import invalidate
+
+            invalidate(canonical_name)
+        except Exception:
+            pass
         return {"status": "ok", "profile": profile_summary(profile)}
     except Exception as exc:
         return {"status": "error", "message": f"Save failed: {exc}"}

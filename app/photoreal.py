@@ -164,7 +164,13 @@ def ensure_source(canonical_name: str, force: bool = False) -> Path | None:
         if min(h, w) < 96:
             return None
         out.parent.mkdir(parents=True, exist_ok=True)
+        old_bytes = out.read_bytes() if out.exists() else None
         cv2.imwrite(str(out), img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        if old_bytes is not None and out.read_bytes() != old_bytes:
+            import shutil
+
+            shutil.rmtree(out.parent / "idle_bank", ignore_errors=True)  # made from the previous photo: gone
+            (out.parent / "matte.png").unlink(missing_ok=True)
         head_ok, head_note = head_in_frame(img)
         (out.parent / "source_info.json").write_text(
             json.dumps({"from": photo_path.name, "width": w, "height": h, "head_in_frame": head_ok, "head_note": head_note}, indent=2),
@@ -173,6 +179,41 @@ def ensure_source(canonical_name: str, force: bool = False) -> Path | None:
         return out
     except Exception:
         return None
+
+
+def invalidate(canonical_name: str, keep_pin: bool = False) -> list[str]:
+    """Throw away everything that was made from the person's current source photo: the prepared photo, the cut-out, the whole
+    animation set, and the pre-made clips (they were rendered from that photo and would no longer match). Call this when the
+    photo changes or the person is rescanned; the next time the page opens, a new photo is prepared and everything is rebuilt
+    from it. The pre-made clips are moved to cinematic/stale/ (not deleted) in case they are wanted back."""
+    import shutil
+
+    d = cinematic_dir(canonical_name)
+    done: list[str] = []
+    for name in ("idle_bank",):
+        if (d / name).exists():
+            shutil.rmtree(d / name, ignore_errors=True)
+            done.append(name)
+    for name in ("matte.png", "source.jpg", "source_info.json"):
+        if (d / name).exists():
+            (d / name).unlink(missing_ok=True)
+            done.append(name)
+    stale = d / "stale"
+    for f in list(d.glob("*.mp4")) + [d / "manifest.json"]:
+        if f.exists():
+            stale.mkdir(exist_ok=True)
+            shutil.move(str(f), str(stale / f.name))
+            done.append(f.name)
+    if not keep_pin:  # a new scan means a new best photo: forget the pinned one (other options, like glasses, stay)
+        try:
+            o = d / "options.json"
+            opts = json.loads(o.read_text(encoding="utf-8"))
+            if opts.pop("source_photo", None):
+                o.write_text(json.dumps(opts, indent=1), encoding="utf-8")
+                done.append("source_photo pin")
+        except Exception:
+            pass
+    return done
 
 
 def status(canonical_name: str) -> dict:
