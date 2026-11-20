@@ -413,8 +413,8 @@ def _ev(**kw) -> bytes:
 
 
 _NUDGE_PROMPTS = {
-    1: "(You and the other person have been sitting quietly for a little while. Say ONE short, natural thing to fill the silence, like a friend in the room would: a casual remark or a light question. Under 15 words. Do not mention this note.)",
-    2: "(Still quiet. Say something short and idle, like thinking out loud or noticing something small. Under 12 words. Do not repeat yourself. Do not mention this note.)",
+    1: "(You and the other person have been sitting quietly for a little while. Say ONE short, natural thing to fill the silence, like a friend in the room would: check whether they are still there (for example 'Hello? Anyone there?' or 'You still with me?'), or a casual remark, or a light question. Under 15 words. Do not mention this note.)",
+    2: "(Still quiet. Say something short and idle: wonder aloud where they went, think out loud, or notice something small. Under 12 words. Do not repeat yourself. Do not mention this note.)",
     3: "(It has been quiet for a good while and you are starting to get bored. Mutter something short, maybe say you are bored. Under 12 words. Do not mention this note.)",
     4: "(A very long silence. You are bored and giving up for now: say a short, trailing-off remark. Under 10 words. Do not mention this note.)",
 }

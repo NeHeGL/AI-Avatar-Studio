@@ -178,28 +178,48 @@ REST_BLINK = -0.22  # < 0 = eyes slightly wider than in the photo; every animati
 MATTE_MODEL = HERE / "models" / "u2net_human_seg.onnx"
 
 
-def make_matte(photo: Path, out: Path) -> bool:
-    """Cut the person out of the prepared photo: writes a white PNG whose alpha is the person (hair included).
-    Runs a small segmentation model locally (onnxruntime); the page uses it to swap the background."""
-    if out.exists() and out.stat().st_mtime >= photo.stat().st_mtime:
-        return True
-    if not MATTE_MODEL.exists():
-        return False
-    import onnxruntime as ort
+_seg = {"sess": None}
 
-    img = cv2.imread(str(photo))
-    h, w = img.shape[:2]
-    sess = ort.InferenceSession(str(MATTE_MODEL), providers=["CPUExecutionProvider"])
-    x = cv2.resize(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), (320, 320), interpolation=cv2.INTER_AREA).astype(np.float32)
+
+def matte_of(rgb: np.ndarray) -> np.ndarray:
+    """How much of each pixel is the person, 0..1 (hair included), for ANY frame. Used for the still photo and, frame by frame,
+    for every animation, so the outline follows the head when it tilts or moves."""
+    if _seg["sess"] is None:
+        import onnxruntime as ort
+
+        try:
+            _seg["sess"] = ort.InferenceSession(str(MATTE_MODEL), providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+        except Exception:
+            _seg["sess"] = ort.InferenceSession(str(MATTE_MODEL), providers=["CPUExecutionProvider"])
+    h, w = rgb.shape[:2]
+    x = cv2.resize(rgb, (320, 320), interpolation=cv2.INTER_AREA).astype(np.float32)
     x = x / max(float(x.max()), 1e-6)
     x = (x - np.array([0.485, 0.456, 0.406], np.float32)) / np.array([0.229, 0.224, 0.225], np.float32)
+    sess = _seg["sess"]
     y = sess.run(None, {sess.get_inputs()[0].name: x.transpose(2, 0, 1)[None].astype(np.float32)})[0][0, 0]
     y = (y - y.min()) / max(float(y.max() - y.min()), 1e-6)
     m = cv2.resize(y, (w, h), interpolation=cv2.INTER_CUBIC)
     m = np.clip((m - 0.5) / 0.3, 0.0, 1.0)  # firm edge, soft transition
     k = max(3, w // 160) | 1
     m = cv2.erode(m, np.ones((k, k), np.uint8))  # pull the edge in a little so no old background shows as a halo
-    m = cv2.GaussianBlur(m, (0, 0), max(1.2, w / 350))
+    # keep only the person: drop isolated specks and fragments of background (a bit of chair, a shelf corner)
+    n, lab, stats, _ = cv2.connectedComponentsWithStats((m > 0.5).astype(np.uint8), connectivity=8)
+    if n > 2:
+        keep = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+        m = m * cv2.dilate((lab == keep).astype(np.uint8), np.ones((k + 2, k + 2), np.uint8))
+    return cv2.GaussianBlur(m, (0, 0), max(1.2, w / 350))
+
+
+def make_matte(photo: Path, out: Path) -> bool:
+    """Cut the person out of the prepared photo: writes a white PNG whose alpha is the person. The page uses it to swap the
+    background behind still pictures and talking videos; animations carry their own per-frame cut-out."""
+    if out.exists() and out.stat().st_mtime >= photo.stat().st_mtime:
+        return True
+    if not MATTE_MODEL.exists():
+        return False
+    img = cv2.imread(str(photo))
+    h, w = img.shape[:2]
+    m = matte_of(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
     rgba = np.dstack([np.full((h, w, 3), 255, np.uint8), (m * 255).astype(np.uint8)])
     cv2.imwrite(str(out), rgba)
     print(f"matte written: {out.name}", flush=True)
@@ -261,48 +281,137 @@ class Gesture:
         return None
 
 
+def hermite(keys, t):
+    """Smooth value at time t through (time, value) keys: a cubic curve with continuous speed (no stop-and-go at the keys).
+    The first and last keys have zero speed, so a clip eases out of and back into the rest pose."""
+    n = len(keys)
+    if t <= keys[0][0]:
+        return keys[0][1]
+    if t >= keys[-1][0]:
+        return keys[-1][1]
+    i = max(j for j in range(n - 1) if keys[j][0] <= t)
+    t0, v0 = keys[i]
+    t1, v1 = keys[i + 1]
+
+    def slope(k):
+        if k <= 0 or k >= n - 1:
+            return 0.0
+        return (keys[k + 1][1] - keys[k - 1][1]) / max(1e-6, keys[k + 1][0] - keys[k - 1][0])
+
+    h = t1 - t0
+    u = (t - t0) / h
+    m0, m1 = slope(i) * h, slope(i + 1) * h
+    return (2 * u**3 - 3 * u**2 + 1) * v0 + (u**3 - 2 * u**2 + u) * m0 + (-2 * u**3 + 3 * u**2) * v1 + (u**3 - u**2) * m1
+
+
 class Clip:
-    """One pre-made waiting animation. Every clip starts and ends exactly on the rest frame (all offsets are zero there),
-    so any clip can follow any other clip, or a pause on the rest frame, with no visible join."""
+    """One pre-made waiting animation, invented on the spot from random poses joined by smooth curves, so no two are alike.
+    Every clip starts and ends exactly on the rest frame (all offsets are zero there), so any clip can follow any other clip,
+    or a pause on the rest frame, with no visible join. Moods are mild and mostly on the eyes and brows."""
 
     FPS = 25
+    # (expression, strength at its peak): kept gentle so the face never looks forced
+    MOOD = {"think": ("thoughtful", 0.45), "ponder": ("thoughtful", 0.35), "curious": ("interested", 0.6), "perk": ("interested", 0.5),
+            "tilt": ("puzzled", 0.3), "sigh": ("concerned", 0.18), "double_take": ("surprised", 0.3), "smile": ("happy", 0.55),
+            "reading": ("interested", 0.2), "look_up": ("thoughtful", 0.3), "glance_back": ("interested", 0.35),
+            # goofy faces: short, subtle, rare
+            "wink": ("wink", 1.0), "brow_up": ("brow_raise", 1.0), "pucker": ("pucker", 0.9), "stare": ("stare", 0.8)}
 
     def __init__(self, rnd: random.Random, kind: str):
         self.kind = kind
-        self.g = None
-        self.blinks = []
+        A = rnd.uniform
+        sg = rnd.choice([-1, 1])
+        # keyframes: (time, yaw, pitch, roll, squint (<0 = eyes wider), mouth, mood strength 0..1)
         if kind == "breathe":
-            self.dur = rnd.uniform(1.8, 2.8)
-            self.amp = [rnd.uniform(-1.0, 1.0) for _ in range(3)]
-        elif kind == "yawn":
-            self.dur = 2.8
-        else:
-            self.g = Gesture(rnd, 0.0, kind)
-            self.dur = self.g.dur
-        nb = 1 if kind in ("breathe", "yawn") else rnd.choice([0, 1, 1])
+            D = A(2.2, 3.6)
+            k = [(0,), (D * A(.35, .55), A(-2.5, 2.5), A(-1.2, 1.2), A(-.8, .8)), (D,)]
+        elif kind == "look_around":
+            D = A(4.2, 6.0)
+            k = [(0,), (D * .2, sg * A(6, 10), A(-1, 1.5), sg * A(.5, 1.5)), (D * .45, sg * A(5, 9), A(-1, 1), sg * A(.3, 1)),
+                 (D * .72, -sg * A(4, 8), A(-1, 1.5), -sg * A(.4, 1)), (D,)]
+        elif kind == "look_up":
+            D = A(3.6, 5.0)
+            k = [(0,), (D * .25, sg * A(2, 5), A(4, 6.5), sg * A(.5, 1.5), 0, 0, 1), (D * .65, sg * A(3, 6), A(3, 6), sg * A(.5, 1.5), 0, 0, 1), (D,)]
+        elif kind == "look_down":
+            D = A(3.0, 4.5)
+            k = [(0,), (D * .3, sg * A(1, 3), -A(3.5, 5.5), sg * A(.3, 1)), (D * .7, sg * A(2, 4), -A(3, 5), sg * A(.3, 1)), (D,)]
+        elif kind == "reading":  # eyes sweep along lines of text
+            D = A(5.5, 7.5)
+            x = A(2.5, 3.5)
+            k = [(0,), (D * .12, -x, -A(3, 4), 0, .08, 0, 1), (D * .30, x, -A(3.2, 4), 0, .08, 0, 1), (D * .42, -x, -A(2.8, 3.8), 0, .08, 0, 1),
+                 (D * .60, x * 1.1, -A(3, 4), 0, .08, 0, 1), (D * .80, 0, -A(.5, 1.5)), (D,)]
+        elif kind == "tilt":
+            D = A(3.2, 4.4)
+            k = [(0,), (D * .28, sg * A(1, 3), A(-.5, 1.5), sg * A(3.5, 6), 0, 0, 1), (D * .7, sg * A(1, 3), A(0, 1.5), sg * A(3, 5.5), 0, 0, 1), (D,)]
+        elif kind == "sigh":
+            D = A(3.0, 3.8)
+            k = [(0,), (D * .32, 0, -A(2.2, 3.2), 0, A(.1, .18), A(.08, .16), 1), (D * .6, 0, A(2.2, 3.4), A(-.5, .5), A(.1, .2), A(.12, .22), 1), (D,)]
+        elif kind == "double_take":
+            D = A(3.0, 3.8)
+            k = [(0,), (.45, sg * A(6, 9), A(-.5, 1), sg * A(.5, 1.5), 0, 0, 0), (D * .4, sg * A(6, 9), 0, sg, 0, 0, 1), (D * .62, -sg * A(1, 3), 0, 0, 0, 0, .5), (D,)]
+        elif kind == "ponder":
+            D = A(3.0, 4.0)
+            k = [(0,), (D * .25, 0, -A(2, 3.2), 0, .08, 0, 1), (D * .6, sg * A(2, 4), -A(1.5, 2.5), sg * A(.5, 1.5), .1, A(.03, .08), 1), (D,)]
+        elif kind == "think":
+            D = A(3.8, 5.0)
+            k = [(0,), (D * .22, sg * A(4, 7), A(2.5, 5), sg * A(1, 3), .06, 0, 1), (D * .65, sg * A(3, 6), A(2, 4), sg * A(1, 2.5), .06, 0, 1), (D,)]
+        elif kind == "curious":
+            D = A(3.2, 4.2)
+            k = [(0,), (D * .25, sg * A(1, 2.5), A(1.5, 3), sg * A(1.5, 3), 0, 0, 1), (D * .68, sg * A(1, 2.5), A(1, 2.5), sg * A(1.5, 3), 0, A(.02, .08), 1), (D,)]
+        elif kind == "perk":
+            D = A(2.8, 3.6)
+            k = [(0,), (D * .2, sg * A(.5, 2), A(1.5, 3), 0, -A(.4, .8), 0, 1), (D * .62, sg * A(.5, 2), A(1, 2.5), sg * A(.3, 1), -A(.3, .7), 0, 1), (D,)]
+        elif kind == "smile":  # something pleasant crosses its mind
+            D = A(3.2, 4.4)
+            k = [(0,), (D * .3, sg * A(1, 3), A(.5, 2), sg * A(1.5, 3.5), 0, 0, 1), (D * .7, sg * A(.5, 2), A(0, 1.5), sg * A(1, 3), 0, 0, 1), (D,)]
+        elif kind == "glance_back":  # looks off to one side, comes back to the screen, looks once more
+            D = A(4.0, 5.5)
+            k = [(0,), (D * .2, sg * A(5, 8), A(-1, 1)), (D * .42, sg * A(5, 8), A(-1, 1)), (D * .6, 0, A(.3, 1.2), 0, 0, 0, 1), (D * .78, sg * A(2, 4), 0), (D,)]
+        elif kind in ("wink", "brow_up", "pucker", "stare"):  # a quick gag: in, hold a beat, out
+            D = A(1.9, 2.8)
+            tilt = sg * A(1.5, 3.5)
+            k = [(0,), (D * .3, sg * A(.5, 2), A(0, 1.5), tilt, 0, 0, 1), (D * .62, sg * A(.5, 2), A(0, 1.2), tilt, 0, 0, 1), (D,)]
+        else:  # yawn
+            kind = self.kind = "yawn"
+            D = A(2.8, 3.2)
+            k = None
+        self.dur = D
+        self.keys = None
+        if k is not None:
+            chan = [[] for _ in range(6)]  # yaw, pitch, roll, squint, mouth, mood
+            for fr in k:
+                t = fr[0]
+                vals = list(fr[1:]) + [0] * (6 - len(fr[1:]))
+                for c in range(6):
+                    chan[c].append((t, float(vals[c])))
+            self.keys = chan
+        self.blinks = []
         if kind != "yawn":
-            for _ in range(nb):
-                self.blinks.append(rnd.uniform(0.35, max(0.4, self.dur - 0.7)))
-        self.frames = int(round(self.dur * self.FPS))
+            for _ in range(rnd.choice([0, 1, 1, 2])):
+                self.blinks.append(rnd.uniform(0.5, max(0.6, D - 0.9)))
+        self.ph = [rnd.uniform(0, 6.28) for _ in range(3)]
+        self.frames = int(round(D * self.FPS))
         self.dur = self.frames / self.FPS
 
     def at(self, t: float) -> dict:
         D = self.dur
-        e = bump(t / D)
-        p = dict(yaw=0.0, pitch=0.0, roll=0.0, dx=0.0, dy=0.0035 * math.sin(2 * math.pi * t / D), blink=0.0, mouth=0.0)
-        if self.kind == "breathe":
-            p["yaw"], p["pitch"], p["roll"] = self.amp[0] * e, 0.5 * self.amp[1] * e, 0.3 * self.amp[2] * e
-        elif self.kind == "yawn":
+        e = bump(t / D)  # 0 at both ends, 1 in the middle: scales the little constant "alive" drift
+        p = dict(yaw=0.0, pitch=0.0, roll=0.0, dx=0.0, dy=0.0035 * math.sin(2 * math.pi * t / D), blink=0.0, mouth=0.0, emotion=None, emo_w=0.0)
+        if self.kind == "yawn":
             x = t / D
             hold = 1.0 if 0.22 < x < 0.6 else (smooth(x / 0.22) if x <= 0.22 else smooth((0.82 - x) / 0.22))
             hold = max(0.0, hold)
             p.update(mouth=0.85 * hold, blink=0.65 * hold, pitch=3.0 * hold, roll=0.8 * hold)
         else:
-            g = self.g.at(self.g.t0 + t)
-            if g is not None:
-                p.update(yaw=g[0], pitch=g[1], roll=g[2], blink=max(0.0, g[3]), mouth=g[4])
-                if g[3] < 0:
-                    p["blink"] = g[3]  # eyes wider than at rest
+            tt = min(t, D)
+            yaw, pitch, roll, squint, mouth, mood = (hermite(c, tt) for c in self.keys)
+            p.update(yaw=yaw, pitch=pitch, roll=roll, blink=squint, mouth=max(0.0, mouth))
+            if self.kind in self.MOOD:
+                name, w = self.MOOD[self.kind]
+                p["emotion"], p["emo_w"] = name, max(0.0, min(1.0, mood)) * w
+        p["yaw"] += 0.45 * e * math.sin(2 * math.pi * 0.37 * t + self.ph[0])  # never perfectly still while it moves
+        p["pitch"] += 0.3 * e * math.sin(2 * math.pi * 0.53 * t + self.ph[1])
+        p["roll"] += 0.2 * e * math.sin(2 * math.pi * 0.29 * t + self.ph[2])
         for b in self.blinks:
             x = (t - b) / 0.19
             if 0 <= x <= 1:
@@ -310,15 +419,33 @@ class Clip:
         return p
 
 
-BANK_PLAN = [("breathe", 14), ("look_around", 3), ("think", 4), ("tilt", 3), ("sigh", 2), ("double_take", 2), ("ponder", 3),
-             ("curious", 3), ("perk", 3), ("yawn", 2)]
-THINK_KINDS = ("think", "ponder", "curious", "tilt")
+BANK_KINDS = {"breathe": 6, "look_around": 3, "look_up": 3, "look_down": 2, "reading": 2, "tilt": 2, "sigh": 2, "double_take": 1.5,
+              "ponder": 3, "think": 3, "curious": 3, "perk": 2, "smile": 3, "glance_back": 2.5, "yawn": 0.8,
+              "wink": 0.5, "brow_up": 0.5, "pucker": 0.35, "stare": 0.35}
+GOOFY_KINDS = ("wink", "brow_up", "pucker", "stare")
+GOOFY_LIFE_SEC = 25 * 60  # goofy faces are made at random and expire; they are never a permanent part of the bank
+THINK_KINDS = ("think", "ponder", "curious", "tilt", "look_up", "reading", "glance_back")
+MAX_BANK = 160  # per person: new ones keep being invented until there are this many
 FFMPEG = HERE / "ffmpeg" / "ffmpeg-master-latest-win64-gpl" / "bin" / "ffmpeg.exe"
 
 
-def build_bank(av: "Avatar", folder: Path, still_current) -> None:
-    """Render the waiting animations once per person and keep them on disk, so later sessions need no rendering at all.
-    A background job: it adds a few clips at a time, and the manifest lists whatever is finished."""
+def _ffmpeg_cmd(w2: int, h2: int, out: Path, alpha: bool) -> list:
+    base = [str(FFMPEG), "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "bgra" if alpha else "bgr24", "-s", f"{w2}x{h2}", "-r", str(Clip.FPS), "-i", "-"]
+    if alpha:
+        return base + ["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-b:v", "0", "-crf", "24", "-deadline", "realtime", "-cpu-used", "6",
+                       "-auto-alt-ref", "0", str(out)]
+    return base + ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "17", "-preset", "veryfast", "-movflags", "+faststart", str(out)]
+
+
+def _with_alpha(frame_bgr: np.ndarray, alpha: np.ndarray) -> bytes:
+    return np.ascontiguousarray(np.dstack([frame_bgr, (alpha * 255).astype(np.uint8)])).tobytes()
+
+
+def build_bank(av: "Avatar", folder: Path, still_current, quiet=lambda: True, note=lambda m: None) -> None:
+    """Keep inventing new waiting animations whenever nothing else is going on, and save them (one per file) so later
+    sessions have them ready. Each animation is saved twice: the normal video, and a transparent twin whose cut-out of the
+    person is worked out for every single frame, so a replaced background follows the head when it tilts or moves.
+    A background job; the manifest lists whatever is finished."""
     import json
     import subprocess
 
@@ -332,39 +459,129 @@ def build_bank(av: "Avatar", folder: Path, still_current) -> None:
         done = json.loads(manifest_path.read_text(encoding="utf-8"))["clips"]
     except Exception:
         done = []
-    have = {c["id"] for c in done if (folder / c["file"]).exists()}
-    done = [c for c in done if c["id"] in have]
+    done = [c for c in done if (folder / c["file"]).exists()]
+    for c in done:  # clips made before the think list grew
+        c["think"] = c["kind"] in THINK_KINDS
+        if c.get("webm") and not (folder / c["webm"]).exists():
+            c.pop("webm")
+
+    def purge():  # goofy faces expire
+        now = time.time()
+        for c in [c for c in done if c.get("expires") and c["expires"] < now]:
+            (folder / c["file"]).unlink(missing_ok=True)
+            if c.get("webm"):
+                (folder / c["webm"]).unlink(missing_ok=True)
+            done.remove(c)
 
     def save():
+        purge()
         manifest_path.write_text(json.dumps({"rest": "rest.jpg", "width": w2, "height": h2, "fps": Clip.FPS, "clips": done}, indent=1), encoding="utf-8")
 
     save()
-    plan = []
-    for i in range(max(n for _, n in BANK_PLAN)):  # interleave kinds so a useful mix exists early
-        for kind, n in BANK_PLAN:
-            if i < n:
-                plan.append((kind, i))
-    rnd = random.Random()
-    for kind, i in plan:
-        cid = f"{kind}_{i:02d}"
-        if cid in have:
+    have_model = MATTE_MODEL.exists()
+
+    def smoothed(prev, frame_rgb):
+        a = matte_of(frame_rgb)[:h2, :w2]
+        return a if prev is None else 0.65 * a + 0.35 * prev  # calm the edge flicker from frame to frame
+
+    # first: give the clips made earlier their transparent twin
+    for c in list(done):
+        if not have_model or c.get("webm") or c.get("ephemeral"):
             continue
         if not still_current():
             return
+        while not quiet():
+            note("paused: a conversation is going on")
+            time.sleep(1.0)
+        note(f"adding cut-out to {c['id']}")
+        try:
+            cap = cv2.VideoCapture(str(folder / c["file"]))
+            out = folder / (Path(c["file"]).stem + ".webm")
+            pr = subprocess.Popen(_ffmpeg_cmd(w2, h2, out, True), stdin=subprocess.PIPE)
+            prev, n = None, 0
+            while True:
+                ok, bgr = cap.read()
+                if not ok:
+                    break
+                bgr = bgr[:h2, :w2]
+                prev = smoothed(prev, cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+                pr.stdin.write(_with_alpha(bgr, prev))
+                n += 1
+            cap.release()
+            pr.stdin.close()
+            pr.wait()
+            if n:
+                c["webm"] = out.name
+                save()
+            else:
+                out.unlink(missing_ok=True)
+        except Exception as exc:
+            print("cut-out failed for", c["id"], exc, flush=True)
+
+    rnd = random.Random()
+    recent: list[str] = []
+    kinds, weights = list(BANK_KINDS), list(BANK_KINDS.values())
+    serial = max([int(c["id"].rsplit("_", 1)[-1]) for c in done if c["id"].rsplit("_", 1)[-1].isdigit()] + [0])
+    while True:
+        if not still_current():
+            return
+        while not quiet():  # a chat is going on: leave the graphics card to it
+            note("paused: a conversation is going on")
+            time.sleep(1.0)
+            if not still_current():
+                return
+        permanent = sum(1 for c in done if not c.get("ephemeral"))
+        goofy_now = sum(1 for c in done if c.get("ephemeral"))
+        pool = [
+            (k, wt) for k, wt in zip(kinds, weights)
+            if k not in recent[-3:]  # never the same thing twice in a row
+            and (permanent < MAX_BANK or k in GOOFY_KINDS)
+            and (k not in GOOFY_KINDS or goofy_now < 3)  # only a few goofy faces exist at any time
+        ]
+        if not pool:
+            time.sleep(30)
+            continue
+        kind = rnd.choices([k for k, _ in pool], [wt for _, wt in pool])[0]
+        recent.append(kind)
+        serial += 1
+        cid = f"{kind}_{serial:03d}"
         clip = Clip(rnd, kind)
+        note(f"rendering {cid}")
         out = folder / f"{cid}.mp4"
-        cmd = [str(FFMPEG), "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{w2}x{h2}", "-r", str(Clip.FPS), "-i", "-",
-               "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "17", "-preset", "veryfast", "-movflags", "+faststart", str(out)]
-        pr = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-        for f in range(clip.frames + 1):  # +1: the closing frame is the rest frame again
-            frame = av.render(**clip.at(min(f / Clip.FPS, clip.dur) if f < clip.frames else 0.0 if False else clip.dur))
-            pr.stdin.write(np.ascontiguousarray(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)[:h2, :w2]).tobytes())
+        outw = folder / f"{cid}.webm"
+        pr = subprocess.Popen(_ffmpeg_cmd(w2, h2, out, False), stdin=subprocess.PIPE)
+        prw = subprocess.Popen(_ffmpeg_cmd(w2, h2, outw, True), stdin=subprocess.PIPE) if have_model else None
+        aborted = False
+        prev = None
+        for f in range(clip.frames + 1):  # the last frame is the rest frame again
+            if f % 10 == 0 and not quiet():  # a chat started mid-clip: drop it, try again later
+                aborted = True
+                break
+            frame = av.render(**clip.at(f / Clip.FPS))
+            bgr = np.ascontiguousarray(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)[:h2, :w2])
+            pr.stdin.write(bgr.tobytes())
+            if prw is not None:
+                prev = smoothed(prev, frame)
+                prw.stdin.write(_with_alpha(bgr, prev))
             time.sleep(0.01)  # leave the live face some room
-        pr.stdin.close()
-        pr.wait()
-        done.append({"id": cid, "file": out.name, "kind": kind, "dur": round((clip.frames + 1) / Clip.FPS, 3), "think": kind in THINK_KINDS})
+        for q in (pr, prw):
+            if q is not None:
+                q.stdin.close()
+                q.wait()
+        if aborted:
+            out.unlink(missing_ok=True)
+            outw.unlink(missing_ok=True)
+            continue
+        entry = {"id": cid, "file": out.name, "kind": clip.kind, "dur": round((clip.frames + 1) / Clip.FPS, 3), "think": clip.kind in THINK_KINDS}
+        if prw is not None:
+            entry["webm"] = outw.name
+        if clip.kind in GOOFY_KINDS:
+            entry["ephemeral"] = True
+            entry["expires"] = time.time() + GOOFY_LIFE_SEC
+        done.append(entry)
         save()
         print(f"bank: {cid} ({len(done)} clips)", flush=True)
+        note(f"idle ({len(done)} clips)")
 
 
 class Idle:
@@ -486,7 +703,7 @@ def main():
     inf = InferenceConfig()
     inf.flag_use_half_precision = True
     pipe = LivePortraitPipeline(inference_cfg=inf, crop_cfg=CropConfig())
-    state = {"avatar": None, "user": "", "n": 0, "jpg": b"", "times": [], "seed": None, "seed_t": 0.0, "lib": {}, "live_on": True}
+    state = {"avatar": None, "user": "", "n": 0, "jpg": b"", "times": [], "seed": None, "seed_t": 0.0, "lib": {}, "live_on": True, "busy_until": 0.0, "bank_msg": ""}
     cond = threading.Condition()
     idle = Idle()
 
@@ -496,7 +713,7 @@ def main():
         state["avatar"] = Avatar(photo, pipe)
         av = state["avatar"]
         threading.Thread(
-            target=lambda: build_bank(av, photo.parent / "idle_bank", lambda: state["avatar"] is av),
+            target=lambda: build_bank(av, photo.parent / "idle_bank", lambda: state["avatar"] is av, lambda: time.time() > state["busy_until"], lambda m: state.__setitem__("bank_msg", m)),
             daemon=True,
         ).start()
         try:
@@ -550,7 +767,7 @@ def main():
     def health():
         t = state["times"]
         fps = (len(t) - 1) / (t[-1] - t[0]) if len(t) > 2 and t[-1] > t[0] else 0.0
-        return {"ok": True, "user": state["user"], "fps": round(fps, 1), "frames": state["n"], "live": state["live_on"], "ready": state["avatar"] is not None}
+        return {"ok": True, "user": state["user"], "fps": round(fps, 1), "frames": state["n"], "live": state["live_on"], "bank": state["bank_msg"], "busy_for": round(max(0.0, state["busy_until"] - time.time()), 1), "ready": state["avatar"] is not None}
 
     @app.post("/seed")
     async def seed(request: Request):
@@ -639,6 +856,12 @@ def main():
             rows.append(np.hstack(tiles))
         ok, buf = cv2.imencode(".jpg", np.vstack(rows), [cv2.IMWRITE_JPEG_QUALITY, 85])
         return Response(buf.tobytes(), media_type="image/jpeg")
+
+    @app.post("/busy")
+    def busy(sec: float = 45.0):
+        """The page says a conversation is going on: pause inventing new animations for a while."""
+        state["busy_until"] = time.time() + min(max(sec, 1.0), 12.0)  # a short pause per report: real chats report every few seconds
+        return {"ok": True}
 
     @app.post("/live")
     def live(on: int = 1):

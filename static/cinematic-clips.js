@@ -69,6 +69,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   const sourceUrl = `${base}/cinematic/source.jpg`;
   const BG_KEY = `avatar-bg2-${base.split("/").pop()}`;
   let matteReady = false;
+  let bgActive = false;
   const bokeh = (colors) =>
     colors
       .map(([x, y, r, c]) => `radial-gradient(circle at ${x}% ${y}%, ${c} 0, ${c} ${(r * 0.25).toFixed(1)}%, transparent ${(r * 0.8).toFixed(1)}%)`)
@@ -98,6 +99,8 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
       choice = image ? { css: `url(${image})` } : BACKGROUNDS.original;
     }
     const on = Boolean(matteReady && choice && choice.css);
+    bgActive = on;
+    if (!on) showAlpha(false);
     fg.style.webkitMaskImage = fg.style.maskImage = on ? `url(${matteUrl})` : "none";
     fg.style.webkitMaskSize = fg.style.maskSize = "100% 100%";
     bg.style.background = on ? choice.css : "none";
@@ -215,6 +218,18 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   bankVideo.preload = "auto";
   bankVideo.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;opacity:0;pointer-events:none;z-index:1;";
   fg.appendChild(bankVideo);
+  // The transparent twin of each animation: its cut-out is worked out per frame, so with a replaced background the outline
+  // follows the head. It sits above the (statically masked) stack, which is hidden while it plays.
+  const alphaVideo = document.createElement("video");
+  alphaVideo.playsInline = true;
+  alphaVideo.muted = true;
+  alphaVideo.preload = "auto";
+  alphaVideo.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;opacity:0;pointer-events:none;z-index:2;";
+  figure.appendChild(alphaVideo);
+  const showAlpha = (on) => {
+    alphaVideo.style.opacity = on ? "1" : "0";
+    fg.style.visibility = on ? "hidden" : "visible";
+  };
   let bank = [];
   let bankPlaying = false;
   let mainActive = false; // a greeting / reply is on screen (or about to be)
@@ -280,11 +295,25 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
       setTimeout(res, maxMs);
     }) : Promise.resolve();
 
+  const recentBank = [];
+  const goofyPlays = {};
+  let lastGoofy = Date.now(); // none right after the page opens
   function pickBank() {
     const thinking = Date.now() < thinkUntil;
-    const pool = bank.filter((c) => c.id !== lastBank && (!thinking || c.think || c.kind === "breathe"));
+    // never repeat anything from the last several clips (as long as there are enough to choose from)
+    const keep = Math.min(8, Math.max(1, Math.floor(bank.length / 3)));
+    const needAlpha = bgActive; // with a replaced background only animations that carry their own cut-out can be used
+    const goofyOk = Date.now() - lastGoofy > 150000; // a goofy face at most every couple of minutes, and never while thinking
+    const candidates = bank.filter(
+      (c) =>
+        !recentBank.slice(-keep).includes(c.id) &&
+        (!thinking || c.think || c.kind === "breathe") &&
+        (!c.ephemeral || (goofyOk && !thinking && (goofyPlays[c.id] || 0) < 2)),
+    );
+    const withAlpha = needAlpha ? candidates.filter((c) => c.webm) : candidates; // prefer clips with their own cut-out
+    const pool = withAlpha.length ? withAlpha : candidates;
     if (!pool.length) return null;
-    const weight = (c) => (c.kind === "breathe" ? (thinking ? 2 : 6) : c.kind === "yawn" ? 0.4 : c.think && thinking ? 3 : 1.5);
+    const weight = (c) => (c.kind === "breathe" ? (thinking ? 2 : 6) : c.kind === "yawn" ? 0.4 : c.ephemeral ? 0.6 : c.think && thinking ? 3 : 1.5);
     let r = Math.random() * pool.reduce((a, c) => a + weight(c), 0);
     for (const c of pool) {
       r -= weight(c);
@@ -295,14 +324,28 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   async function playBank(c) {
     bankPlaying = true;
     lastBank = c.id;
+    recentBank.push(c.id);
+    if (c.ephemeral) {
+      goofyPlays[c.id] = (goofyPlays[c.id] || 0) + 1;
+      lastGoofy = Date.now();
+    }
+    if (recentBank.length > 12) recentBank.shift();
     try {
-      bankVideo.src = `${bankBase}/${c.file}`;
-      bankVideo.currentTime = 0;
-      await bankVideo.play();
-      bankVideo.style.opacity = "1";
+      const useAlpha = bgActive && Boolean(c.webm);
+      const vid = useAlpha ? alphaVideo : bankVideo;
+      vid.src = `${bankBase}/${useAlpha ? c.webm : c.file}`;
+      vid.currentTime = 0;
+      await vid.play();
+      if (useAlpha) {
+        bankVideo.style.opacity = "0";
+        showAlpha(true);
+      } else {
+        showAlpha(false);
+        bankVideo.style.opacity = "1";
+      }
       await new Promise((res) => {
-        bankVideo.onended = res;
-        bankVideo.onerror = res;
+        vid.onended = res;
+        vid.onerror = res;
         setTimeout(res, (c.dur + 1) * 1000);
       });
     } catch (e) {
@@ -313,6 +356,13 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     lastBankEnd = Date.now();
     resolveRest();
   }
+  const pingBusy = (sec = 45) => {
+    try {
+      fetch(`${IDLE}/busy?sec=${sec}`, { method: "POST", mode: "no-cors" }).catch(() => {});
+    } catch {
+      /* ignore */
+    }
+  };
   function tickBank() {
     clearTimeout(bankTimer);
     if (disposed || !bankOn() || mainActive || bankPlaying) return;
@@ -344,7 +394,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
       setLive(false);
       tickBank();
     }
-    if (!disposed) bankLoadTimer = setTimeout(loadBank, bank.length < 40 ? 8000 : 60000);
+    if (!disposed) bankLoadTimer = setTimeout(loadBank, bank.length < 160 ? 20000 : 120000); // new animations keep arriving
   }
   /** After a greeting or reply: let the live face carry on from the last frame, then settle back to the pre-made animations. */
   function backToBank() {
@@ -354,6 +404,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
       if (bankOn()) {
         setLive(false);
         bankVideo.style.opacity = "0";
+        showAlpha(false);
         tickBank();
       }
     }, 3400);
@@ -437,6 +488,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   function settle(on) {
     if (bankOn()) {
       thinkUntil = on ? Date.now() + 20000 : 0;
+      if (on) pingBusy(8); // a blip of 'thinking' (the mic hears noise too) only pauses new animations briefly
       if (on) tickBank();
       return;
     }
@@ -456,7 +508,10 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     next.currentTime = 0;
     await next.play(); // resolves once the first frame is playing, so the fade never shows a blank picture
     next.style.opacity = "1";
-    setTimeout(() => (bankVideo.style.opacity = "0"), 220);
+    setTimeout(() => {
+      bankVideo.style.opacity = "0";
+      showAlpha(false);
+    }, 220);
     if (old) {
       old.style.zIndex = "1";
       setTimeout(() => {
@@ -489,6 +544,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   /** Common run-loop: show a video, play a voice, resolve shortly after the voice ends. The last frame stays up. */
   function run({ videoUrl, voiceUrl, maxMs, label }) {
     mainActive = true;
+    pingBusy();
     clearTimeout(bankTimer);
     clearTimeout(resumeTimer);
     thinkUntil = 0;
@@ -604,6 +660,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
       clearTimeout(bankLoadTimer);
       clearInterval(bankWatch);
       bankVideo.remove();
+      alphaVideo.remove();
       pickerEl?.remove();
       bg.remove();
       fg.remove();
