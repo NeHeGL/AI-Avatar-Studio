@@ -684,7 +684,7 @@ import {
 function boot() {
   updateLogout();
   renderHelloIntro(root, () => {
-    setPhaseLabels(phaseLabel, statusHint, "You", "");
+    setPhaseLabels(phaseLabel, statusHint, "", "");
     renderNameStep(root, (name) => submitName(name));
   });
 }
