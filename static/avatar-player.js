@@ -1,6 +1,6 @@
 import { buildMeshFromScans, createMeshPuppet, meshFromLandmarks } from "/static/face-mesh-avatar.js?v=20";
 import { createVoiceChat } from "/static/voice-chat.js?v=3";
-import { loadCinematic } from "/static/cinematic-clips.js?v=4";
+import { loadCinematic } from "/static/cinematic-clips.js?v=5";
 
 
 /**
@@ -45,7 +45,7 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
   const meterBar = stageEl.querySelector("#chat-meter-bar");
   const meterThr = stageEl.querySelector("#chat-meter-thr");
   let chat = null;
-  let cinema = null; // pre-rendered full-quality clips (greeting / thinking), when the library exists
+  let cinema = null; // photo-real layer: live idle face + pre-rendered clips + reply videos, when the library exists
 
   let puppet = null;
   let rafId = 0;
@@ -271,6 +271,12 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
   let chatBrainFoot = "";
 
   /** Play a full-quality clip over the avatar; the mic is muted meanwhile so the chat does not hear it. */
+  const cinemaReady = loadCinematic(stageEl, profile, { onNote: (m) => !destroyed && (statusEl.textContent = m) }).catch(() => null);
+  cinemaReady.then((c) => {
+    if (destroyed) c?.dispose();
+    else cinema = c;
+  });
+
   async function playCinematic(kind) {
     if (!cinema || destroyed) return false;
     const wasMuted = chat ? chat.muted : false;
@@ -319,7 +325,7 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
       });
       await chat.start();
       muteBtn.disabled = false;
-      cinema = await loadCinematic(stageEl, profile, { onNote: (m) => !destroyed && (statusEl.textContent = m) }).catch(() => null);
+      cinema = await cinemaReady;
       if (!(cinema && (await playCinematic("greeting")))) await chat.say(`Hello, I'm ${j.display_name || name}.`);
     } catch (e) {
       console.error(e);

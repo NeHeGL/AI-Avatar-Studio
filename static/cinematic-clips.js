@@ -56,11 +56,43 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   };
   const layers = [makeVideo(), makeVideo()];
   let front = -1; // index of the layer currently showing, -1 = none yet
+  let fadeTimer = 0;
+
+  // Live idle layer: the same photo, alive in real time (blinks, breathing, slow drift). It sits under the videos and is
+  // what you see whenever nothing is playing, so the face never freezes. If its service is not running we simply hold
+  // the last video frame instead.
+  const IDLE = opts.idleUrl || "http://localhost:8770";
+  const slug = base.split("/").pop();
+  let idleOk = false;
+  let idleImg = null;
+  function startIdle() {
+    try {
+      fetch(`${IDLE}/use?user=${encodeURIComponent(slug)}`, { method: "POST", mode: "no-cors" }).catch(() => {});
+    } catch {
+      return;
+    }
+    const img = new Image();
+    img.style.cssText =
+      "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;z-index:0;opacity:0;transition:opacity .3s ease;pointer-events:none;";
+    img.onload = () => {
+      idleOk = true;
+      img.style.opacity = "1";
+    };
+    img.onerror = () => {
+      idleOk = false;
+      img.style.opacity = "0";
+    };
+    img.src = `${IDLE}/stream?u=${Date.now()}`;
+    figure.appendChild(img);
+    idleImg = img;
+  }
+  startIdle();
 
   /** Start `url` on the hidden layer, then fade it in over the one showing. Resolves with that video element. */
   async function startVideo(url) {
     const next = layers[front < 0 ? 0 : 1 - front];
     const old = front < 0 ? null : layers[front];
+    clearTimeout(fadeTimer);
     next.style.opacity = "0";
     next.style.zIndex = "2";
     next.src = url;
@@ -115,6 +147,10 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
         }
         if (voiceUrl.startsWith("blob:")) URL.revokeObjectURL(voiceUrl);
         current = null;
+        if (idleOk) {
+          clearTimeout(fadeTimer);
+          fadeTimer = setTimeout(() => release(), 700);
+        }
         resolve(ok);
       };
       voice.addEventListener("ended", () => {
@@ -168,7 +204,12 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     get busy() {
       return Boolean(current);
     },
+    get hasIdle() {
+      return idleOk;
+    },
     dispose() {
+      clearTimeout(fadeTimer);
+      idleImg?.remove();
       for (const v of layers) {
         try {
           v.pause();

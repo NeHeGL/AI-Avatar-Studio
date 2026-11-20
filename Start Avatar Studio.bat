@@ -9,6 +9,7 @@ rem Replies are rendered as a real video of the person by the local Ditto servic
 set AVATAR_REPLY_VIDEO=ditto
 echo Starting the local video renderer...
 start "Ditto render service" /min "ml\realtime\dittoenv\Scripts\python.exe" "ml\realtime\ditto_render_server.py"
+start "Idle avatar" /min "ml\realtime\lpenv\Scripts\python.exe" "ml\realtime\idle_server.py"
 echo Starting Avatar Studio...
 "ml\.venv\Scripts\python.exe" run.py
 if errorlevel 1 (
