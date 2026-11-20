@@ -52,6 +52,10 @@ body {
   font-size: 0.95rem;
 }
 
+.subtitle:empty {
+  display: none;
+}
+
 .screen-root {
   margin-top: 2rem;
 }
@@ -335,6 +339,10 @@ button.secondary:hover {
   margin-top: 2rem;
   font-size: 0.85rem;
   color: var(--muted);
+}
+
+.footer:has(> #status-hint:empty) {
+  display: none;
 }
 
 .hidden {

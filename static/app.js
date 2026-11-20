@@ -493,7 +493,7 @@ async function renderAvatar(result, afterUpdate = false) {
     avatarTeardown();
     avatarTeardown = null;
   }
-  setPhase("Avatar", afterUpdate ? "Profile refined — playing avatar." : "Your avatar");
+  setPhase("", afterUpdate ? "Profile refined — playing avatar." : ""); // the avatar screen needs no caption under the title or in the footer
   const profile = result?.profile || state.profile;
   const mode = result?.avatar_mode || (profile?.avatar_ready ? "live" : "placeholder");
   root.innerHTML = `<section class="card avatar-stage" id="avatar-stage"></section>`;
