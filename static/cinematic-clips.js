@@ -201,6 +201,118 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     return v;
   };
   const layers = [makeVideo(), makeVideo()];
+
+  // ---- Bank of pre-made waiting animations. Every clip starts and ends on the same rest frame, so they can follow each other
+  // (or a pause on the rest frame) without a visible join, and they cost no computing while a reply is being prepared. ----
+  const bankBase = `${base}/cinematic/idle_bank`;
+  const bankVideo = document.createElement("video");
+  bankVideo.playsInline = true;
+  bankVideo.muted = true;
+  bankVideo.preload = "auto";
+  bankVideo.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;opacity:0;pointer-events:none;z-index:1;";
+  fg.appendChild(bankVideo);
+  let bank = [];
+  let bankPlaying = false;
+  let mainActive = false; // a greeting / reply is on screen (or about to be)
+  let thinkUntil = 0; // while a reply is being prepared: only thoughtful animations
+  let liveWanted = false;
+  let bankTimer = 0;
+  let resumeTimer = 0;
+  let bankLoadTimer = 0;
+  let lastBank = "";
+  let bankWasOn = false;
+  let restWaiters = [];
+  const bankOn = () => bank.length >= 6;
+  const showLive = () => !bankOn() || liveWanted;
+  const resolveRest = () => {
+    const w = restWaiters;
+    restWaiters = [];
+    for (const f of w) f();
+  };
+  const whenRest = (maxMs = 4500) =>
+    bankPlaying ? new Promise((res) => {
+      restWaiters.push(res);
+      setTimeout(res, maxMs);
+    }) : Promise.resolve();
+
+  function pickBank() {
+    const thinking = Date.now() < thinkUntil;
+    const pool = bank.filter((c) => c.id !== lastBank && (!thinking || c.think || c.kind === "breathe"));
+    if (!pool.length) return null;
+    const weight = (c) => (c.kind === "breathe" ? (thinking ? 2 : 6) : c.kind === "yawn" ? 0.4 : c.think && thinking ? 3 : 1.5);
+    let r = Math.random() * pool.reduce((a, c) => a + weight(c), 0);
+    for (const c of pool) {
+      r -= weight(c);
+      if (r <= 0) return c;
+    }
+    return pool[0];
+  }
+  async function playBank(c) {
+    bankPlaying = true;
+    lastBank = c.id;
+    try {
+      bankVideo.src = `${bankBase}/${c.file}`;
+      bankVideo.currentTime = 0;
+      await bankVideo.play();
+      bankVideo.style.opacity = "1";
+      await new Promise((res) => {
+        bankVideo.onended = res;
+        bankVideo.onerror = res;
+        setTimeout(res, (c.dur + 1) * 1000);
+      });
+    } catch {
+      /* skip this one */
+    }
+    bankPlaying = false;
+    resolveRest();
+  }
+  function tickBank() {
+    clearTimeout(bankTimer);
+    if (disposed || !bankOn() || mainActive || bankPlaying) return;
+    const c = pickBank();
+    if (!c) return;
+    playBank(c).then(() => {
+      if (!mainActive && !disposed) bankTimer = setTimeout(tickBank, Date.now() < thinkUntil ? 60 : 150 + Math.random() * 900);
+    });
+  }
+  function setLive(on) {
+    liveWanted = on;
+    try {
+      fetch(`${IDLE}/live?on=${on ? 1 : 0}`, { method: "POST", mode: "no-cors" }).catch(() => {});
+    } catch {
+      /* ignore */
+    }
+    if (idleImg) idleImg.style.opacity = idleOk && showLive() ? "1" : "0";
+  }
+  async function loadBank() {
+    try {
+      const r = await fetch(`${bankBase}/manifest.json`, { cache: "no-store" });
+      if (r.ok) bank = (await r.json()).clips || [];
+    } catch {
+      /* no bank yet: the live face does the waiting */
+    }
+    if (bankOn() && !bankWasOn) {
+      bankWasOn = true;
+      baseStill.src = `${bankBase}/rest.jpg`; // the exact frame every animation starts and ends on
+      setLive(false);
+      tickBank();
+    }
+    if (!disposed) bankLoadTimer = setTimeout(loadBank, bank.length < 40 ? 8000 : 60000);
+  }
+  /** After a greeting or reply: let the live face carry on from the last frame, then settle back to the pre-made animations. */
+  function backToBank() {
+    clearTimeout(resumeTimer);
+    resumeTimer = setTimeout(() => {
+      mainActive = false;
+      if (bankOn()) {
+        setLive(false);
+        bankVideo.style.opacity = "0";
+        tickBank();
+      }
+    }, 3400);
+  }
+  // the live-face settings below are only read after this first network wait, so starting here is safe
+  void loadBank();
   let front = -1; // index of the layer currently showing, -1 = none yet
   let fadeTimer = 0;
 
@@ -249,7 +361,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
       } catch {
         idleOk = false;
       }
-      img.style.opacity = idleOk ? "1" : "0";
+      img.style.opacity = idleOk && showLive() ? "1" : "0";
     };
     poll();
     idlePoll = setInterval(poll, 1500);
@@ -276,6 +388,11 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
 
   /** on=true: the live face goes still and neutral (a reply is being prepared) so the reply video fades in from a match. */
   function settle(on) {
+    if (bankOn()) {
+      thinkUntil = on ? Date.now() + 20000 : 0;
+      if (on) tickBank();
+      return;
+    }
     if (!idleOk) return;
     fetch(`${IDLE}/settle?on=${on ? 1 : 0}`, { method: "POST", mode: "no-cors" }).catch(() => {});
   }
@@ -292,6 +409,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     next.currentTime = 0;
     await next.play(); // resolves once the first frame is playing, so the fade never shows a blank picture
     next.style.opacity = "1";
+    setTimeout(() => (bankVideo.style.opacity = "0"), 220);
     if (old) {
       old.style.zIndex = "1";
       setTimeout(() => {
@@ -323,6 +441,10 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
 
   /** Common run-loop: show a video, play a voice, resolve shortly after the voice ends. The last frame stays up. */
   function run({ videoUrl, voiceUrl, maxMs, label }) {
+    mainActive = true;
+    clearTimeout(bankTimer);
+    clearTimeout(resumeTimer);
+    thinkUntil = 0;
     current = new Promise((resolve) => {
       let finished = false;
       let tail = 0;
@@ -344,10 +466,17 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
           clearTimeout(fadeTimer);
           // hold the last frame for a moment, tell the live face what it looks like, then fade across to it
           fadeTimer = setTimeout(async () => {
+            if (bankOn()) {
+              setLive(true);
+              await new Promise((r) => setTimeout(r, 450)); // the live face wakes up
+            }
             const ok = await seedFromFront();
             if (ok) await new Promise((r) => setTimeout(r, 160)); // let the live face render its first matching frames
             release(ok);
+            if (bankOn() && !current) backToBank();
           }, 400);
+        } else if (bankOn()) {
+          backToBank();
         }
         resolve(ok);
       };
@@ -358,7 +487,8 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
         note(`The voice for ${label} could not be loaded.`);
         finish(false);
       });
-      startVideo(videoUrl)
+      whenRest()
+        .then(() => startVideo(videoUrl))
         .then(() => voice.play().catch((e) => note(`Sound was blocked by the browser (${e?.name || e}) — click the page once and try again.`)))
         .catch((e) => {
           note(`The ${label} picture could not start (${e?.name || e}).`);
@@ -412,6 +542,10 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     dispose() {
       disposed = true;
       clearTimeout(matteTimer);
+      clearTimeout(bankTimer);
+      clearTimeout(resumeTimer);
+      clearTimeout(bankLoadTimer);
+      bankVideo.remove();
       pickerEl?.remove();
       bg.remove();
       fg.remove();

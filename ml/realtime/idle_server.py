@@ -458,7 +458,7 @@ def main():
     inf = InferenceConfig()
     inf.flag_use_half_precision = True
     pipe = LivePortraitPipeline(inference_cfg=inf, crop_cfg=CropConfig())
-    state = {"avatar": None, "user": "", "n": 0, "jpg": b"", "times": [], "seed": None, "seed_t": 0.0, "lib": {}}
+    state = {"avatar": None, "user": "", "n": 0, "jpg": b"", "times": [], "seed": None, "seed_t": 0.0, "lib": {}, "live_on": True}
     cond = threading.Condition()
     idle = Idle()
 
@@ -486,12 +486,13 @@ def main():
         nxt = time.time()
         while True:
             av = state["avatar"]
-            if av is None:
+            if av is None or not state["live_on"]:  # the pre-made animations are on screen: leave the GPU alone
                 time.sleep(0.1)
+                nxt = time.time()
                 continue
             now = time.time()
             try:
-                w = math.exp(-(now - state["seed_t"]) / 2.2) if state["seed"] is not None else 0.0  # fades out over a few seconds
+                w = math.exp(-(now - state["seed_t"]) / 1.4) if state["seed"] is not None else 0.0  # fades out over a few seconds
                 rgb = av.render(**idle.state(now), seed=state["seed"], w=w)
                 ok, buf = cv2.imencode(".jpg", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 90])
             except Exception as e:  # a bad frame must not kill the loop
@@ -563,6 +564,12 @@ def main():
             return {"ok": True, "user": user, "seconds": round(load(user), 1)}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=404)
+
+    @app.post("/live")
+    def live(on: int = 1):
+        """on=0: stop rendering the live face (the page is playing pre-made animations); on=1: resume."""
+        state["live_on"] = bool(on)
+        return {"ok": True, "live": state["live_on"]}
 
     @app.get("/expr/sheet")
     def expr_sheet(cols: int = 8, px: int = 200):
