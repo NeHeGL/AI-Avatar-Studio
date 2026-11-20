@@ -282,16 +282,83 @@ async function runUpdateSection(section) {
   renderUpdateAvatarScreen();
 }
 
-async function deleteExistingProfile() {
-  const ok = confirm(
-    "Delete your saved profile on this computer? You'll start fresh next time."
-  );
-  if (!ok) return;
+/** Deleting a profile takes three separate confirmations: read the warning, type the profile's name, then wait out a short countdown. */
+let deleteTimer = 0;
+function deleteExistingProfile() {
+  renderDeleteStep(1);
+}
+
+function renderDeleteStep(step) {
+  clearInterval(deleteTimer);
+  const name = state.profile?.display_name || state.canonicalName;
+  const safe = escapeHtml(name);
+  const cancel = `<button type="button" class="btn-primary" id="del-cancel">Cancel and keep this profile</button>`;
+  if (step === 1) {
+    root.innerHTML = `
+      <section class="card home-card">
+        <h2>Delete &ldquo;${safe}&rdquo;?</h2>
+        <p class="home-hint">This removes the saved profile: its details, notes and settings. It can't be undone.</p>
+        <div class="home-actions">
+          ${cancel}
+          <button type="button" class="btn-ghost btn-danger" id="del-next">Continue</button>
+        </div>
+      </section>`;
+    document.getElementById("del-next").onclick = () => renderDeleteStep(2);
+  } else if (step === 2) {
+    root.innerHTML = `
+      <section class="card home-card">
+        <h2>Are you sure?</h2>
+        <p class="home-hint">To confirm, type the profile's name exactly: <strong>${safe}</strong></p>
+        <input type="text" class="step-input" id="del-name" placeholder="${escapeAttr(name)}" autocomplete="off" />
+        <div class="home-actions">
+          ${cancel}
+          <button type="button" class="btn-ghost btn-danger" id="del-next" disabled>Continue</button>
+        </div>
+      </section>`;
+    const input = document.getElementById("del-name");
+    const next = document.getElementById("del-next");
+    input.focus();
+    input.addEventListener("input", () => {
+      next.disabled = input.value.trim().toLowerCase() !== name.trim().toLowerCase();
+    });
+    next.onclick = () => !next.disabled && renderDeleteStep(3);
+  } else {
+    let left = 5;
+    root.innerHTML = `
+      <section class="card home-card">
+        <h2>Last chance</h2>
+        <p class="home-hint">&ldquo;${safe}&rdquo; will be deleted permanently the moment you press the red button.</p>
+        <div class="home-actions">
+          ${cancel}
+          <button type="button" class="btn-ghost btn-danger" id="del-final" disabled>Delete permanently (${left})</button>
+        </div>
+      </section>`;
+    const fin = document.getElementById("del-final");
+    deleteTimer = setInterval(() => {
+      left -= 1;
+      if (left > 0) {
+        fin.textContent = `Delete permanently (${left})`;
+      } else {
+        clearInterval(deleteTimer);
+        fin.disabled = false;
+        fin.textContent = "Delete permanently";
+      }
+    }, 1000);
+    fin.onclick = () => !fin.disabled && finishDeleteProfile();
+  }
+  document.getElementById("del-cancel").onclick = () => {
+    clearInterval(deleteTimer);
+    renderProfileHome();
+  };
+}
+
+async function finishDeleteProfile() {
   const result = await api("/api/walkthrough/delete-profile", {
     canonical_name: state.canonicalName,
   });
   if (result.status === "error") {
     alert(result.message);
+    renderProfileHome();
     return;
   }
   state.enteredName = "";
