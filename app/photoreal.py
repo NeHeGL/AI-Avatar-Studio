@@ -21,6 +21,61 @@ def cinematic_dir(canonical_name: str) -> Path:
     return MEDIA_DIR / _user_media_dir(canonical_name) / "cinematic"
 
 
+_YUNET = Path(__file__).resolve().parent.parent / "ml" / "realtime" / "models" / "face_detection_yunet_2023mar.onnx"
+
+
+def _find_face(img: np.ndarray):
+    """(x, y, w, h) of the most confident face, or None. A small local detector (YuNet): it only has to say where the head is."""
+    try:
+        if not _YUNET.exists():
+            return None
+        h, w = img.shape[:2]
+        k = min(1.0, 960 / max(h, w))
+        small = cv2.resize(img, (round(w * k), round(h * k))) if k < 1 else img
+        det = cv2.FaceDetectorYN.create(str(_YUNET), "", (small.shape[1], small.shape[0]), 0.6, 0.3, 5000)
+        _, faces = det.detect(small)
+        if faces is None or not len(faces):
+            return None
+        f = max(faces, key=lambda r: float(r[-1]))
+        return tuple(int(v / k) for v in f[:4])
+    except Exception:
+        return None
+
+
+def head_in_frame(img: np.ndarray) -> tuple[bool, str]:
+    """Is the whole head inside the picture (hair on top, chin below, both sides)?"""
+    h, w = img.shape[:2]
+    face = _find_face(img)
+    if face is None:
+        return False, "no face found"
+    x, y, fw, fh = face
+    if x - 0.25 * fw < 0 or x + 1.25 * fw > w or y - 0.5 * fh < 0 or y + fh > h:  # the chin must be inside; the lower neck may be cut
+        return False, "head touches or crosses the edge"
+    return True, "ok"
+
+
+def _frame_head(img: np.ndarray) -> np.ndarray:
+    """Tall or wide photos become a square at FULL size (no zooming out, no padding). A portrait keeps the top of the photo and
+    loses its bottom, slid just far enough that the top of the head has a little room; a landscape is centred on the face.
+    Roughly square photos are left exactly as they are."""
+    h, w = img.shape[:2]
+    if abs(w / h - 1.0) < 0.08:
+        return img
+    side = min(w, h)
+    face = _find_face(img)
+    if h > w:  # portrait: cut off the bottom, not the top
+        y0 = 0
+        if face:
+            x, y, fw, fh = face
+            y0 = int(min(max(y - 0.6 * fh - 0.06 * side, 0), h - side))  # top of the hair a little below the frame's top edge
+        return img[y0 : y0 + side, 0:side]
+    x0 = (w - side) // 2
+    if face:
+        x, y, fw, fh = face
+        x0 = int(min(max(x + fw / 2 - side / 2, 0), w - side))
+    return img[0:side, x0 : x0 + side]
+
+
 def _clean_borders(img: np.ndarray) -> np.ndarray:
     """Cut away black bars (camera frame edges) and the black corners left by circular scan crops."""
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -40,6 +95,7 @@ def _clean_borders(img: np.ndarray) -> np.ndarray:
         yy, xx = np.mgrid[0:side, 0:side]
         outside = ((xx - side / 2) ** 2 + (yy - side / 2) ** 2 > (side / 2 - 2) ** 2).astype(np.uint8) * 255
         img = cv2.inpaint(img, outside, 6, cv2.INPAINT_TELEA)
+    img = _frame_head(img)
     # small photos: enlarge so the later steps have enough pixels to work with (they will be soft; a rescan fixes that)
     h, w = img.shape[:2]
     if min(h, w) < 640:
@@ -67,8 +123,10 @@ def ensure_source(canonical_name: str, force: bool = False) -> Path | None:
             return None
         out.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(out), img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        head_ok, head_note = head_in_frame(img)
         (out.parent / "source_info.json").write_text(
-            json.dumps({"from": Path(face.path).name, "width": w, "height": h}, indent=2), encoding="utf-8"
+            json.dumps({"from": Path(face.path).name, "width": w, "height": h, "head_in_frame": head_ok, "head_note": head_note}, indent=2),
+            encoding="utf-8",
         )
         return out
     except Exception:

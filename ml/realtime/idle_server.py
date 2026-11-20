@@ -888,8 +888,11 @@ def main():
         return Response(buf.tobytes(), media_type="image/jpeg")
 
     @app.get("/frame.jpg")
-    def frame():
-        """The newest frame as a plain image (browsers handle this more reliably than a live stream)."""
+    def frame(user: str = ""):
+        """The newest frame as a plain image (browsers handle this more reliably than a live stream).
+        If the caller names a person who is not the one currently loaded, no picture is sent (never show someone else's face)."""
+        if user and user != state["user"]:
+            return Response(status_code=409)
         return Response(state["jpg"], media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
     @app.get("/stream")

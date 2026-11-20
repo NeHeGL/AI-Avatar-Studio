@@ -441,20 +441,27 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     // Pull the newest frame again and again (a live stream is flaky in some browsers).
     let alive = true;
     stopFrames = () => (alive = false);
-    const next = (delay) => setTimeout(() => alive && (img.src = `${IDLE}/frame.jpg?n=${++frameNo}`), delay);
+    const next = (delay) => setTimeout(() => alive && (img.src = `${IDLE}/frame.jpg?user=${encodeURIComponent(slug)}&n=${++frameNo}`), delay);
     img.onload = () => {
       lastFrameAt = Date.now();
       next(30);
     };
-    img.onerror = () => next(600);
+    img.onerror = () => {
+      img.style.opacity = "0"; // not our person (or the service is busy): show nothing rather than someone else
+      next(600);
+    };
     next(0);
     const poll = async () => {
       try {
         const r = await fetch(`${IDLE}/health`, { cache: "no-store" });
         const j = await r.json();
+        if (j.ok && j.user !== slug && document.visibilityState === "visible") {
+          // the live-face service is holding someone else (another tab, a restart): take it back for this person
+          fetch(`${IDLE}/use?user=${encodeURIComponent(slug)}`, { method: "POST", mode: "no-cors" }).catch(() => {});
+        }
         idleOk = Boolean(j.ok && j.user === slug && (j.frames > 0 || (j.ready && j.live === false))); // paused is not the same as down
         if (idleOk) {
-          if (Date.now() - lastFrameAt > 3000) img.src = `${IDLE}/frame.jpg?n=${++frameNo}`; // frames stopped arriving: kick it
+          if (Date.now() - lastFrameAt > 3000) img.src = `${IDLE}/frame.jpg?user=${encodeURIComponent(slug)}&n=${++frameNo}`; // frames stopped arriving: kick it
         }
       } catch {
         idleOk = false;
