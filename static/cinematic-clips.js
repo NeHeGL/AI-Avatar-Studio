@@ -218,6 +218,8 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   let bank = [];
   let bankPlaying = false;
   let mainActive = false; // a greeting / reply is on screen (or about to be)
+  let mainIdleSince = Date.now(); // when the last greeting / reply sentence finished
+  let lastDiag = 0;
   let thinkUntil = 0; // while a reply is being prepared: only thoughtful animations
   let liveWanted = false;
   let bankTimer = 0;
@@ -233,7 +235,20 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   bankVideo.addEventListener("timeupdate", () => (lastProgress = Date.now()));
   // watchdog: if the chain of animations ever stalls or breaks, restart it (or hand over to the live face)
   const bankWatch = setInterval(() => {
-    if (disposed || mainActive) return;
+    if (disposed) return;
+    // a greeting / reply finished a while ago and nothing new started (e.g. waiting for the next sentence): keep animating
+    if (mainActive && !current && bankOn() && Date.now() - mainIdleSince > 4500) {
+      mainActive = false;
+      clearTimeout(resumeTimer);
+      setLive(false);
+      bankVideo.style.opacity = "0";
+      tickBank();
+    }
+    if (mainActive) return;
+    if (bank.length >= 6 && !bankPlaying && Date.now() - lastBankEnd > 9000 && Date.now() - lastDiag > 15000) {
+      lastDiag = Date.now();
+      note(`Waiting animations idle (clips ${bank.length}, fails ${bankFails}, think ${Date.now() < thinkUntil})`);
+    }
     if (bank.length >= 6 && bankFails >= 3 && !liveWanted) {
       setLive(true);
       return;
@@ -487,6 +502,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
         }
         if (voiceUrl.startsWith("blob:")) URL.revokeObjectURL(voiceUrl);
         current = null;
+        mainIdleSince = Date.now();
         if (idleOk) {
           clearTimeout(fadeTimer);
           // hold the last frame for a moment, tell the live face what it looks like, then fade across to it
