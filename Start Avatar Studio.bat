@@ -7,6 +7,9 @@ set AVATAR_LLM_MODE=relaxed
 rem set AVATAR_LLM=your-uncensored-model:tag
 rem Replies are rendered as a real video of the person by the local Ditto service (started below).
 set AVATAR_REPLY_VIDEO=ditto
+echo Closing any old Avatar Studio servers first...
+powershell -NoProfile -Command "foreach($p in 8765,8770,8771){Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}"
+timeout /t 2 /nobreak >nul
 echo Starting the local video renderer...
 start "Ditto render service" /min "ml\realtime\dittoenv\Scripts\python.exe" "ml\realtime\ditto_render_server.py"
 start "Idle avatar" /min "ml\realtime\lpenv\Scripts\python.exe" "ml\realtime\idle_server.py"
