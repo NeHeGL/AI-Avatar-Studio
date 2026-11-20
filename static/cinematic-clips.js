@@ -649,7 +649,23 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
         resolve(ok);
       };
       voice.addEventListener("ended", () => {
-        tail = setTimeout(() => finish(true), 300);
+        // The reply video runs a little longer than the speech so the head can settle back onto the rest frame. Let it finish:
+        // freezing it now would hold the head mid-way and then jump to the rest picture.
+        const v = frontVideo();
+        if (v && !v.ended && !v.paused && Number.isFinite(v.duration)) {
+          const left = Math.max(0, v.duration - v.currentTime) * 1000;
+          v.addEventListener(
+            "ended",
+            () => {
+              clearTimeout(tail);
+              tail = setTimeout(() => finish(true), 120);
+            },
+            { once: true },
+          );
+          tail = setTimeout(() => finish(true), left + 800); // never wait forever
+        } else {
+          tail = setTimeout(() => finish(true), 300);
+        }
       });
       voice.addEventListener("error", () => {
         note(`The voice for ${label} could not be loaded.`);

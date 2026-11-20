@@ -199,7 +199,7 @@ function renderProfileHome() {
       <ul class="sections-list" id="sections-overview"></ul>
       <p class="home-hint">Choose what you'd like to do.</p>
       <div class="home-actions">
-        <button type="button" class="btn-primary" id="btn-preview">Preview avatar</button>
+        <button type="button" class="btn-primary" id="btn-preview">View avatar</button>
         <button type="button" class="btn-ghost" id="btn-update">Update your avatar</button>
         <button type="button" class="btn-ghost btn-danger" id="btn-delete">Delete and start fresh</button>
       </div>
@@ -498,7 +498,7 @@ async function renderAvatar(result, afterUpdate = false) {
   const mode = result?.avatar_mode || (profile?.avatar_ready ? "live" : "placeholder");
   root.innerHTML = `<section class="card avatar-stage" id="avatar-stage"></section>`;
   const stage = document.getElementById("avatar-stage");
-  const { mountAvatarPlayer } = await import("/static/avatar-player.js?v=100");
+  const { mountAvatarPlayer } = await import("/static/avatar-player.js?v=101");
   avatarTeardown = mountAvatarPlayer(stage, profile || {}, {
     onBackProfile: () => {
       avatarTeardown?.();
