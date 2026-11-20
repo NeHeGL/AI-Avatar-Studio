@@ -67,7 +67,10 @@ export function createVoiceChat(o) {
   let stream = null;
   let node = null;
   let superseded = false;
-  let busy = false; // avatar is thinking or talking: ignore the mic
+  let busy = false; // avatar is thinking or talking: keep listening, but save what you say for the next turn
+  let voiceOutUntil = 0; // while (and just after) the avatar's own voice is playing, only clearly louder speech counts
+  let voiceOut = false;
+  let pending = []; // what you said while the avatar was busy, as recorded chunks, sent as one turn when it is done
   let muted = false;
   let stopped = false;
   let resumeAt = 0;
@@ -116,7 +119,16 @@ export function createVoiceChat(o) {
         if (ev.type === "say") {
           o.onLine("avatar", ev.text);
           const blob = b64ToBlob(ev.audio, "audio/wav");
-          chain = chain.then(() => (stopped ? null : o.playClip(blob, ev.video_url || "")));
+          chain = chain.then(async () => {
+            if (stopped) return null;
+            voiceOut = true;
+            try {
+              return await o.playClip(blob, ev.video_url || "");
+            } finally {
+              voiceOut = false;
+              voiceOutUntil = performance.now() + 700; // its own voice fades out of the room
+            }
+          });
         } else {
           onEvent?.(ev);
         }
@@ -148,7 +160,19 @@ export function createVoiceChat(o) {
     resumeAt = performance.now() + 600; // let the room go quiet before listening again
     busy = false;
     lastActive = performance.now();
+    if (pending.length && !failed && !stopped && !muted) {
+      const got = pending;
+      pending = [];
+      sendHeard(got); // you kept talking while it was busy: answer that now
+      return;
+    }
+    pending = [];
     if (!failed && !stopped) o.onStatus(muted ? "Mic muted." : "Listening… just talk.");
+  }
+
+  function sendHeard(got) {
+    const wav = encodeWav16k(got, ctx.sampleRate);
+    blobToBase64(wav).then((b64) => runTurn({ audio_base64: b64 }));
   }
 
   function onAudio(e) {
@@ -157,9 +181,10 @@ export function createVoiceChat(o) {
     for (let i = 0; i < x.length; i++) sum += x[i] * x[i];
     const rms = Math.sqrt(sum / x.length);
     const ms = (x.length / ctx.sampleRate) * 1000;
-    const threshold = Math.max(0.01, floor * 3.2);
+    const ownVoice = busy && (voiceOut || performance.now() < voiceOutUntil);
+    const threshold = Math.max(0.01, floor * 3.2) * (ownVoice ? 3.5 : 1); // never mistake its own voice for you
     o.onLevel(rms, threshold);
-    if (muted || busy || performance.now() < resumeAt) {
+    if (muted || (!busy && performance.now() < resumeAt)) {
       speaking = false;
       chunks = [];
       loud = 0;
@@ -177,7 +202,7 @@ export function createVoiceChat(o) {
         chunks = [...preroll];
         speechMs = 0;
         quietMs = 0;
-        o.onStatus("Hearing you…");
+        if (!busy) o.onStatus("Hearing you…");
       }
       return;
     }
@@ -191,11 +216,14 @@ export function createVoiceChat(o) {
       preroll = [];
       loud = 0;
       if (speechMs - quietMs < 350) {
-        o.onStatus("Listening… just talk.");
+        if (!busy) o.onStatus("Listening… just talk.");
         return; // a click or cough
       }
-      const wav = encodeWav16k(got, ctx.sampleRate);
-      blobToBase64(wav).then((b64) => runTurn({ audio_base64: b64 }));
+      if (busy) {
+        pending.push(...got); // keep it; answered right after the current reply
+        return;
+      }
+      sendHeard(got);
     }
   }
 
