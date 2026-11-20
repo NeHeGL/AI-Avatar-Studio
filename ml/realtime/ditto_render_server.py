@@ -96,8 +96,9 @@ def _emotion_delta(name: str):
     if not rec:
         return None
     d = np.zeros((1, 63), dtype=np.float32)
+    MOUTH = {6, 7, 12, 14, 17, 19, 20}  # the lip-sync already moves the mouth: only a small share of the mood goes there
     for kp, ax, amt in rec.get("exp", []):
-        d[0, int(kp) * 3 + "xyz".index(ax)] += float(amt)
+        d[0, int(kp) * 3 + "xyz".index(ax)] += float(amt) * (0.3 if int(kp) in MOUTH else 1.0)
     return d
 
 
@@ -116,7 +117,7 @@ def _mood_ctrl(name: str, n_frames: int, strength: float = 1.0) -> dict:
 
 
 @app.post("/render")
-async def render(request: Request, source: str, out: str, emotion: str = "", intensity: float = 0.65):
+async def render(request: Request, source: str, out: str, emotion: str = "", intensity: float = 0.55):
     data = await request.body()
     TMP.mkdir(parents=True, exist_ok=True)
     wav = TMP / f"{uuid.uuid4().hex[:10]}.wav"
