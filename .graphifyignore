@@ -16,3 +16,16 @@ __pycache__/
 *.ckpt
 *.pt
 *.bin
+
+# Third-party code and generated/duplicate folders: they are not this project's own code.
+ml/realtime/ditto/
+ml/realtime/LivePortrait/
+ml/realtime/lpenv/
+ml/realtime/dittoenv/
+ml/realtime/ffmpeg/
+static/vendor/
+backups_2026-11-17/
+*.mjs.map
+*.mp4
+*.task
+*.wasm

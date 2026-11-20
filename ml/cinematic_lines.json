@@ -1,0 +1,13 @@
+{
+  "_note": "Lines for the pre-rendered full-quality clip library. Edit freely: kind = greeting | thinking | reaction | closing. Re-run ml/cinematic_build.py to (re)render only what changed.",
+  "lines": [
+    { "id": "greeting_1", "kind": "greeting", "text": "Hey, good to see you. What's on your mind?" },
+    { "id": "thinking_1", "kind": "thinking", "text": "Hmm, let me think about that for a second." },
+    { "id": "thinking_2", "kind": "thinking", "text": "Good question. Give me a moment." },
+    { "id": "reaction_laugh", "kind": "reaction", "text": "Ha, that's funny." },
+    { "id": "reaction_agree", "kind": "reaction", "text": "Yeah, I know what you mean." },
+    { "id": "reaction_ok", "kind": "reaction", "text": "Okay. Got it." },
+    { "id": "reaction_repeat", "kind": "reaction", "text": "Sorry, I didn't catch that. Could you say it again?" },
+    { "id": "closing_1", "kind": "closing", "text": "Alright, talk to you later. Take care." }
+  ]
+}
