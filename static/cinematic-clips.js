@@ -245,6 +245,13 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
       tickBank();
     }
     if (mainActive) return;
+    // proof of life: saved loops chain with gaps under a second. If none has played for 8 s, they cannot play here:
+    // use the live face (which always moves) instead of freezing on a still photo.
+    const lastAlive = Math.max(lastProgress, lastBankEnd, mainIdleSince);
+    if (bankOn() && Date.now() - lastAlive > 8000) {
+      bankFails = 3;
+      note("The saved waiting animations would not play in this browser; using the live face instead.");
+    }
     if (bank.length >= 6 && !bankPlaying && Date.now() - lastBankEnd > 9000 && Date.now() - lastDiag > 15000) {
       lastDiag = Date.now();
       note(`Waiting animations idle (clips ${bank.length}, fails ${bankFails}, think ${Date.now() < thinkUntil})`);
@@ -517,7 +524,16 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
             if (bankOn() && !current) backToBank();
           }, 400);
         } else if (bankOn()) {
-          backToBank();
+          // no live face to hand over to: hold the last frame briefly, then clear it so the waiting animations show
+          clearTimeout(fadeTimer);
+          fadeTimer = setTimeout(() => {
+            if (current) return;
+            release(false);
+            clearTimeout(resumeTimer);
+            mainActive = false;
+            bankVideo.style.opacity = "0";
+            tickBank();
+          }, 500);
         }
         resolve(ok);
       };
