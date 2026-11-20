@@ -1,6 +1,6 @@
 import { buildMeshFromScans, createMeshPuppet, meshFromLandmarks } from "/static/face-mesh-avatar.js?v=20";
 import { createVoiceChat } from "/static/voice-chat.js?v=2";
-import { loadCinematic } from "/static/cinematic-clips.js?v=3";
+import { loadCinematic } from "/static/cinematic-clips.js?v=4";
 
 
 /**

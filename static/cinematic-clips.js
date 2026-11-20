@@ -1,19 +1,19 @@
 /**
- * Pre-rendered full-quality clips ("cinematic" library) played over the live avatar.
+ * Photo-real layer drawn over the live avatar: pre-rendered "cinematic" clips (greeting, thinking, reactions,
+ * closing) and live-rendered reply videos, all from the same wide photo so the framing never jumps.
  *
- * ml/cinematic_build.py renders each line (greeting, thinking, reactions, closing) with the best talking-video
- * model and writes data/media/<user>/cinematic/manifest.json (+ the spoken line as src/<id>.wav).
- * If that manifest exists, this module plays the clips on top of the avatar; if not, everything falls back
- * silently to the normal avatar.
+ * ml/cinematic_build.py renders the clips into data/media/<user>/cinematic/ (manifest.json + the spoken line as
+ * src/<id>.wav). Replies come from the local Ditto render service via the chat server (video_url per sentence).
+ * With no library the module returns null and everything falls back silently to the animated face.
  *
- * The picture plays MUTED (browsers always allow that) and the voice plays from the clip's own WAV through a
- * normal audio element, the same way the chat's own voice is played, so it does not depend on the browser's
- * video-codec or autoplay-with-sound rules. If sound is blocked, `onNote` says so.
+ * Two <video> layers cross-fade, so the picture never drops out between one clip and the next. Pictures play
+ * MUTED (browsers always allow that); voices play through normal audio elements, the same way the chat's own
+ * voice does, so nothing depends on the browser's video-codec or autoplay-with-sound rules.
  *
  *   const cinema = await loadCinematic(stageEl, profile, { onNote });   // null when there is no library
- *   await cinema?.play("greeting");                                    // resolves when the clip has finished
- *   cinema?.playIfIdle("thinking");                                    // fire-and-forget
- *   await cinema?.whenIdle();                                          // wait for a running clip
+ *   await cinema?.play("greeting");                                    // fixed clip; resolves when finished
+ *   await cinema?.playReply(videoUrl, wavBlob);                         // live reply sentence
+ *   await cinema?.whenIdle();   cinema?.release();   cinema?.dispose();
  */
 export async function loadCinematic(stageEl, profile, opts = {}) {
   const note = (m) => {
@@ -43,13 +43,45 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   const figure = stageEl.querySelector("#avatar");
   if (!figure) return null;
   figure.style.position = "relative";
-  const video = document.createElement("video");
-  video.playsInline = true;
-  video.muted = true; // picture only; the voice comes from the WAV below
-  video.preload = "auto";
-  video.style.cssText =
-    "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;opacity:0;pointer-events:none;transition:opacity .18s ease;";
-  figure.appendChild(video);
+
+  const makeVideo = () => {
+    const v = document.createElement("video");
+    v.playsInline = true;
+    v.muted = true; // picture only; voices come from audio elements
+    v.preload = "auto";
+    v.style.cssText =
+      "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;opacity:0;pointer-events:none;transition:opacity .2s ease;";
+    figure.appendChild(v);
+    return v;
+  };
+  const layers = [makeVideo(), makeVideo()];
+  let front = -1; // index of the layer currently showing, -1 = none yet
+
+  /** Start `url` on the hidden layer, then fade it in over the one showing. Resolves with that video element. */
+  async function startVideo(url) {
+    const next = layers[front < 0 ? 0 : 1 - front];
+    const old = front < 0 ? null : layers[front];
+    next.style.opacity = "0";
+    next.style.zIndex = "2";
+    next.src = url;
+    next.currentTime = 0;
+    await next.play(); // resolves once the first frame is playing, so the fade never shows a blank picture
+    next.style.opacity = "1";
+    if (old) {
+      old.style.zIndex = "1";
+      setTimeout(() => {
+        try {
+          old.pause();
+        } catch {
+          /* ignore */
+        }
+        old.style.opacity = "0";
+      }, 260);
+    }
+    front = front < 0 ? 0 : 1 - front;
+    return next;
+  }
+  const frontVideo = () => (front < 0 ? null : layers[front]);
 
   let current = null; // promise of the running clip
   const lastByKind = {};
@@ -64,107 +96,66 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     return c;
   }
 
-  function play(kind) {
-    const clip = pick(kind);
-    if (!clip) return Promise.resolve(false);
-    if (current) return current;
-    current = new Promise((resolve) => {
-      let finished = false;
-      let voice = null;
-      let tailTimer = 0;
-      const finish = (ok) => {
-        if (finished) return;
-        finished = true;
-        clearTimeout(tailTimer);
-        video.removeEventListener("ended", onVideoEnd);
-        video.removeEventListener("error", onVideoErr);
-        // keep the last frame on screen (the picture of you) instead of dropping back to the animated face
-        try {
-          voice?.pause();
-          video.pause();
-        } catch {
-          /* ignore */
-        }
-        current = null;
-        resolve(ok);
-      };
-      const onVideoEnd = () => finish(true);
-      const onVideoErr = () => {
-        note(`The "${clip.id}" clip could not be played by this browser.`);
-        finish(false);
-      };
-      video.addEventListener("ended", onVideoEnd);
-      video.addEventListener("error", onVideoErr);
-      video.src = `${base}/cinematic/${clip.video}`;
-      video.currentTime = 0;
-
-      voice = new Audio(`${base}/cinematic/src/${clip.id}.wav`);
-      voice.preload = "auto";
-      // end shortly after the words end: the rendered video is padded with a few seconds of silent idling
-      voice.addEventListener("ended", () => {
-        tailTimer = setTimeout(() => finish(true), 350);
-      });
-      voice.addEventListener("error", () => note(`The voice for "${clip.id}" could not be loaded.`));
-
-      const vp = video.play();
-      const ap = voice.play();
-      vp.then(() => {
-        video.style.opacity = "1";
-      }).catch((e) => {
-        note(`The "${clip.id}" picture could not start (${e?.name || e}).`);
-        finish(false);
-      });
-      ap.catch((e) => note(`Clip sound was blocked by the browser (${e?.name || e}) — click the page once and try again.`));
-      setTimeout(() => finish(true), Math.max(5000, (clip.seconds || 3) * 1000 + 3500)); // never get stuck
-    });
-    return current;
-  }
-
-  /** Play a live-rendered reply video together with its voice (the picture is muted; the voice is the given WAV blob). */
-  function playReply(videoUrl, blob) {
-    if (current) return current.then(() => playReply(videoUrl, blob));
+  /** Common run-loop: show a video, play a voice, resolve shortly after the voice ends. The last frame stays up. */
+  function run({ videoUrl, voiceUrl, maxMs, label }) {
     current = new Promise((resolve) => {
       let finished = false;
       let tail = 0;
-      const voice = new Audio(URL.createObjectURL(blob));
+      const voice = new Audio(voiceUrl);
+      voice.preload = "auto";
       const finish = (ok) => {
         if (finished) return;
         finished = true;
         clearTimeout(tail);
         try {
           voice.pause();
-          video.pause();
+          frontVideo()?.pause(); // hold the last frame (the picture of you) rather than dropping back to the animated face
         } catch {
           /* ignore */
         }
-        URL.revokeObjectURL(voice.src);
+        if (voiceUrl.startsWith("blob:")) URL.revokeObjectURL(voiceUrl);
         current = null;
         resolve(ok);
       };
       voice.addEventListener("ended", () => {
-        tail = setTimeout(() => finish(true), 200);
+        tail = setTimeout(() => finish(true), 300);
       });
-      voice.addEventListener("error", () => finish(false));
-      video.src = videoUrl;
-      video.currentTime = 0;
-      video
-        .play()
-        .then(() => {
-          video.style.opacity = "1";
-          return voice.play().catch((e) => note(`Reply sound was blocked by the browser (${e?.name || e}).`));
-        })
+      voice.addEventListener("error", () => {
+        note(`The voice for ${label} could not be loaded.`);
+        finish(false);
+      });
+      startVideo(videoUrl)
+        .then(() => voice.play().catch((e) => note(`Sound was blocked by the browser (${e?.name || e}) — click the page once and try again.`)))
         .catch((e) => {
-          note(`The reply video could not start (${e?.name || e}).`);
+          note(`The ${label} picture could not start (${e?.name || e}).`);
           finish(false);
         });
-      setTimeout(() => finish(true), 90000); // never get stuck
+      setTimeout(() => finish(true), maxMs); // never get stuck
     });
     return current;
   }
 
-  /** Hide the overlay (used when the animated face has to speak because no video was available). */
+  function play(kind) {
+    const clip = pick(kind);
+    if (!clip) return Promise.resolve(false);
+    if (current) return current;
+    return run({
+      videoUrl: `${base}/cinematic/${clip.video}`,
+      voiceUrl: `${base}/cinematic/src/${clip.id}.wav`,
+      maxMs: Math.max(6000, (clip.seconds || 3) * 1000 + 4000),
+      label: `"${clip.id}" clip`,
+    });
+  }
+
+  function playReply(videoUrl, blob) {
+    if (current) return current.then(() => playReply(videoUrl, blob));
+    return run({ videoUrl, voiceUrl: URL.createObjectURL(blob), maxMs: 90000, label: "reply" });
+  }
+
+  /** Hide the photo layer (used when the animated face has to speak because no video was available). */
   function release() {
-    video.style.opacity = "0";
+    for (const v of layers) v.style.opacity = "0";
+    front = -1;
   }
 
   return {
@@ -178,11 +169,13 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
       return Boolean(current);
     },
     dispose() {
-      try {
-        video.pause();
-        video.remove();
-      } catch {
-        /* ignore */
+      for (const v of layers) {
+        try {
+          v.pause();
+          v.remove();
+        } catch {
+          /* ignore */
+        }
       }
     },
   };
