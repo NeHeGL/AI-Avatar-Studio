@@ -392,7 +392,7 @@ def run(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) ->
     global _launch_browser, _launch_url
     import uvicorn
 
-    _launch_url = f"http://{host}:{port}/"
+    _launch_url = f"http://{'localhost' if host == '127.0.0.1' else host}:{port}/"
     _launch_browser = open_browser
     print(f"\nAvatar Studio — {_launch_url}")
     print("Keep this window open while you use the app (Ctrl+C to quit).")

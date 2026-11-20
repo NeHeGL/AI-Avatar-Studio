@@ -1,7 +1,7 @@
 @echo off
 cd /d "%~dp0"
 rem Chat brain (Ollama). Use any local model name from: ollama list
-set AVATAR_LLM=gemma-opus-cuda:q4km
+set AVATAR_LLM=gemma3:27b
 set AVATAR_LLM_MODE=relaxed
 rem set AVATAR_LLM=your-uncensored-model:tag
 echo Starting Avatar Studio...

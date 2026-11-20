@@ -10,6 +10,9 @@ MIN_FACE_ANGLES = 4
 def pick_avatar_face(assets: list[ScanAsset]) -> ScanAsset | None:
     if not assets:
         return None
+    chosen = [a for a in assets if (a.caption or "").startswith("Best photo")]
+    if chosen:  # picked by sharpness / neutral face / front-facing, see tools/score_photos
+        return chosen[0]
     by_name = [a for a in assets if Path(a.path).name.startswith("angle_100_")]
     if by_name:
         return max(by_name, key=lambda a: a.quality_score)
