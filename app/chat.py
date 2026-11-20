@@ -273,8 +273,46 @@ def _speak(sess: Session, text: str) -> bytes:
     return _wav_bytes(wav.squeeze().cpu().numpy(), tts.sr)
 
 
+def _ditto_video_url(canonical_name: str, wav_bytes: bytes) -> str:
+    """Photoreal talking video of this sentence from the local Ditto render service; "" on any problem (the page then
+    falls back to the animated face). Uses the same wide photo as the pre-rendered clips so the framing never jumps."""
+    try:
+        import urllib.parse
+        import urllib.request
+
+        from app.capture import _user_media_dir
+        from app.storage import MEDIA_DIR
+        from app.walkthrough import media_url
+
+        user_dir = MEDIA_DIR / _user_media_dir(canonical_name)
+        source = user_dir / "cinematic" / "source.jpg"
+        if not source.exists():
+            return ""
+        talk_dir = user_dir / "talk"
+        talk_dir.mkdir(parents=True, exist_ok=True)
+        for old in talk_dir.glob("reply_*.mp4"):  # keep only recent replies
+            if time.time() - old.stat().st_mtime > 3600:
+                old.unlink(missing_ok=True)
+        out = talk_dir / f"reply_{uuid.uuid4().hex[:10]}.mp4"
+        url = os.environ.get("AVATAR_DITTO_URL", "http://127.0.0.1:8771") + "/render?" + urllib.parse.urlencode({"source": str(source), "out": str(out)})
+        t0 = time.time()
+        req = urllib.request.Request(url, data=wav_bytes, method="POST", headers={"Content-Type": "audio/wav"})
+        with urllib.request.urlopen(req, timeout=180) as r:
+            ok = json.loads(r.read()).get("ok")
+        if not ok or not out.exists():
+            return ""
+        _log(f"reply video {out.name} in {time.time() - t0:.1f}s")
+        return media_url(str(out))
+    except Exception as exc:
+        _log("reply video skipped:", exc)
+        return ""
+
+
 def _talk_video_url(canonical_name: str, wav_bytes: bytes) -> str:
-    """InfiniteTalk clip for this sentence; empty string if disabled or on failure."""
+    """Video for this sentence; empty string if disabled or on failure.
+    AVATAR_REPLY_VIDEO=ditto -> local Ditto service (fast, photoreal); AVATAR_PHOTOREAL_VIDEO=1 -> InfiniteTalk (slow)."""
+    if os.environ.get("AVATAR_REPLY_VIDEO", "").strip().lower() == "ditto":
+        return _ditto_video_url(canonical_name, wav_bytes)
     if os.environ.get("AVATAR_PHOTOREAL_VIDEO", "").strip() != "1":
         return ""
     try:

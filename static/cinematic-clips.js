@@ -78,19 +78,13 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
         clearTimeout(tailTimer);
         video.removeEventListener("ended", onVideoEnd);
         video.removeEventListener("error", onVideoErr);
-        video.style.opacity = "0";
+        // keep the last frame on screen (the picture of you) instead of dropping back to the animated face
         try {
           voice?.pause();
+          video.pause();
         } catch {
           /* ignore */
         }
-        setTimeout(() => {
-          try {
-            video.pause();
-          } catch {
-            /* ignore */
-          }
-        }, 200);
         current = null;
         resolve(ok);
       };
@@ -126,9 +120,58 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     return current;
   }
 
+  /** Play a live-rendered reply video together with its voice (the picture is muted; the voice is the given WAV blob). */
+  function playReply(videoUrl, blob) {
+    if (current) return current.then(() => playReply(videoUrl, blob));
+    current = new Promise((resolve) => {
+      let finished = false;
+      let tail = 0;
+      const voice = new Audio(URL.createObjectURL(blob));
+      const finish = (ok) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(tail);
+        try {
+          voice.pause();
+          video.pause();
+        } catch {
+          /* ignore */
+        }
+        URL.revokeObjectURL(voice.src);
+        current = null;
+        resolve(ok);
+      };
+      voice.addEventListener("ended", () => {
+        tail = setTimeout(() => finish(true), 200);
+      });
+      voice.addEventListener("error", () => finish(false));
+      video.src = videoUrl;
+      video.currentTime = 0;
+      video
+        .play()
+        .then(() => {
+          video.style.opacity = "1";
+          return voice.play().catch((e) => note(`Reply sound was blocked by the browser (${e?.name || e}).`));
+        })
+        .catch((e) => {
+          note(`The reply video could not start (${e?.name || e}).`);
+          finish(false);
+        });
+      setTimeout(() => finish(true), 90000); // never get stuck
+    });
+    return current;
+  }
+
+  /** Hide the overlay (used when the animated face has to speak because no video was available). */
+  function release() {
+    video.style.opacity = "0";
+  }
+
   return {
     clips,
     play,
+    playReply,
+    release,
     playIfIdle: (kind) => (current ? Promise.resolve(false) : play(kind)),
     whenIdle: () => current || Promise.resolve(),
     get busy() {

@@ -1,6 +1,6 @@
 import { buildMeshFromScans, createMeshPuppet, meshFromLandmarks } from "/static/face-mesh-avatar.js?v=20";
 import { createVoiceChat } from "/static/voice-chat.js?v=2";
-import { loadCinematic } from "/static/cinematic-clips.js?v=2";
+import { loadCinematic } from "/static/cinematic-clips.js?v=3";
 
 
 /**
@@ -223,10 +223,16 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
   }
 
   /** Play one reply clip; the mouth follows it (loudness + vowel colour analysed up front). */
-  async function playClip(blob) {
+  async function playClip(blob, videoUrl = "") {
     if (destroyed) return;
     clearTimeout(thinkingTimer);
     await cinema?.whenIdle();
+    if (cinema && videoUrl) {
+      // a real video of you saying this sentence, same framing as the clips: no jump
+      statusEl.textContent = "Speaking…";
+      if (await cinema.playReply(videoUrl, blob)) return;
+    }
+    cinema?.release(); // the animated face has to speak this one: remove the photo overlay
     try {
       analysis = await analyzeVoice(await blob.arrayBuffer());
     } catch (e) {
