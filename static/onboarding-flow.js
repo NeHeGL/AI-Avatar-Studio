@@ -235,8 +235,7 @@ export async function renderNameStep(root, onSubmit) {
     root,
     `
     <section class="step-card step-card--center">
-      <p class="step-eyebrow">Profile Management</p>
-      <h2 class="step-title">${hasProfiles ? "Select a profile" : "What's your name?"}</h2>
+      <h2 class="step-title">Profile Management</h2>
       ${
         hasProfiles
           ? `<select class="step-input step-select" id="profile-select">
@@ -246,7 +245,7 @@ export async function renderNameStep(root, onSubmit) {
       </select>`
           : ""
       }
-      <input type="text" class="step-input" id="name-input" placeholder="Type your full name" autocomplete="off" ${hasProfiles ? "hidden" : ""} />
+      <input type="text" class="step-input" id="name-input" placeholder="${hasProfiles ? "Type the new profile's full name" : "What's your name?"}" autocomplete="off" ${hasProfiles ? "hidden" : ""} />
       <div class="step-actions step-actions--solo">
         <button type="button" class="btn-primary" id="name-ok">OK</button>
       </div>
