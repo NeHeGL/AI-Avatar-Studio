@@ -550,7 +550,7 @@ def main():
     def health():
         t = state["times"]
         fps = (len(t) - 1) / (t[-1] - t[0]) if len(t) > 2 and t[-1] > t[0] else 0.0
-        return {"ok": True, "user": state["user"], "fps": round(fps, 1), "frames": state["n"]}
+        return {"ok": True, "user": state["user"], "fps": round(fps, 1), "frames": state["n"], "live": state["live_on"], "ready": state["avatar"] is not None}
 
     @app.post("/seed")
     async def seed(request: Request):

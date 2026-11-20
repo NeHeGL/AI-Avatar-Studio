@@ -401,7 +401,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
       try {
         const r = await fetch(`${IDLE}/health`, { cache: "no-store" });
         const j = await r.json();
-        idleOk = Boolean(j.ok && j.user === slug && j.frames > 0);
+        idleOk = Boolean(j.ok && j.user === slug && (j.frames > 0 || (j.ready && j.live === false))); // paused is not the same as down
         if (idleOk) {
           if (Date.now() - lastFrameAt > 3000) img.src = `${IDLE}/frame.jpg?n=${++frameNo}`; // frames stopped arriving: kick it
         }
