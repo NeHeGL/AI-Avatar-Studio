@@ -30,6 +30,7 @@ LLM_URL = os.environ.get("AVATAR_LLM_URL", "http://127.0.0.1:11434")
 # relaxed = casual private chat, no scolding about language; safe = tighter assistant tone
 LLM_MODE = os.environ.get("AVATAR_LLM_MODE", "relaxed").strip().lower()
 LLM_TEMPERATURE = float(os.environ.get("AVATAR_LLM_TEMPERATURE", "0.85" if LLM_MODE == "relaxed" else "0.7"))
+LLM_NUM_CTX = int(os.environ.get("AVATAR_LLM_CTX", "3072"))  # conversation window in tokens: a bigger one costs GPU memory for nothing here
 LLM_NUM_PREDICT = int(os.environ.get("AVATAR_LLM_NUM_PREDICT", "280"))
 SR_IN = 16000
 
@@ -172,7 +173,7 @@ def _ollama_stream(system: str, history: list[dict]):
             "messages": msgs,
             "stream": True,
             "keep_alive": "30m",
-            "options": {"temperature": LLM_TEMPERATURE, "num_predict": LLM_NUM_PREDICT},
+            "options": {"temperature": LLM_TEMPERATURE, "num_predict": LLM_NUM_PREDICT, "num_ctx": LLM_NUM_CTX},
         }).encode(),
     )
     with urllib.request.urlopen(req, timeout=300) as r:

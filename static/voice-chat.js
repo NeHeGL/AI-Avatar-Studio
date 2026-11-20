@@ -133,9 +133,9 @@ export function createVoiceChat(o) {
           chain = chain.then(async () => {
             if (stopped) return null;
             voiceOut = true;
-            o.onLine("avatar", ev.text); // the words appear when they start being spoken, not when they were written
             try {
-              return await o.playClip(blob, ev.video_url || "");
+              // the words appear when the voice really starts (the page tells us), not when they were written
+              return await o.playClip(blob, ev.video_url || "", (secs) => o.onSpeak?.(ev.text, secs));
             } finally {
               voiceOut = false;
               voiceOutUntil = performance.now() + 1500; // its own voice fades out of the room

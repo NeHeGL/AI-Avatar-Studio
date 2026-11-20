@@ -597,7 +597,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   }
 
   /** Common run-loop: show a video, play a voice, resolve shortly after the voice ends. The last frame stays up. */
-  function run({ videoUrl, voiceUrl, maxMs, label }) {
+  function run({ videoUrl, voiceUrl, maxMs, label, onStart }) {
     mainActive = true;
     pingBusy();
     clearTimeout(bankTimer);
@@ -673,7 +673,12 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
       });
       whenRest()
         .then(() => startVideo(videoUrl))
-        .then(() => voice.play().catch((e) => note(`Sound was blocked by the browser (${e?.name || e}) — click the page once and try again.`)))
+        .then(() =>
+          voice
+            .play()
+            .catch((e) => note(`Sound was blocked by the browser (${e?.name || e}) — click the page once and try again.`))
+            .finally(() => onStart?.(voice.duration)),
+        )
         .catch((e) => {
           note(`The ${label} picture could not start (${e?.name || e}).`);
           finish(false);
@@ -695,9 +700,9 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     });
   }
 
-  function playReply(videoUrl, blob) {
-    if (current) return current.then(() => playReply(videoUrl, blob));
-    return run({ videoUrl, voiceUrl: URL.createObjectURL(blob), maxMs: 90000, label: "reply" });
+  function playReply(videoUrl, blob, onStart) {
+    if (current) return current.then(() => playReply(videoUrl, blob, onStart));
+    return run({ videoUrl, voiceUrl: URL.createObjectURL(blob), maxMs: 90000, label: "reply", onStart });
   }
 
   /** Hide the photo layer (used when the animated face has to speak because no video was available). */

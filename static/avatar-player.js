@@ -1,5 +1,5 @@
-import { createVoiceChat } from "/static/voice-chat.js?v=16";
-import { loadCinematic } from "/static/cinematic-clips.js?v=33";
+import { createVoiceChat } from "/static/voice-chat.js?v=17";
+import { loadCinematic } from "/static/cinematic-clips.js?v=34";
 
 /**
  * The chat avatar: a photo-real face (live idle motion, pre-made clips, live reply videos) plus the voice chat.
@@ -66,12 +66,12 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
   });
 
   /** Play one spoken sentence: a video of the person saying it when there is one, otherwise just the voice. */
-  async function playClip(blob, videoUrl = "") {
+  async function playClip(blob, videoUrl = "", onSpeak = null) {
     if (destroyed) return;
     await cinema?.whenIdle();
     if (cinema && videoUrl) {
       statusEl.textContent = "Speaking…";
-      const played = await cinema.playReply(videoUrl, blob);
+      const played = await cinema.playReply(videoUrl, blob, (secs) => onSpeak?.(secs));
       // a reply video is single-use: once it has played, the server throws it away
       setTimeout(() => {
         fetch("/api/chat/reply-played", {
@@ -85,6 +85,7 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
     cinema?.release(); // no video for this sentence: back to the live idle face while the voice plays
     audio.src = URL.createObjectURL(blob);
     statusEl.textContent = "Speaking…";
+    audio.addEventListener("playing", () => onSpeak?.(audio.duration), { once: true });
     await new Promise((resolve) => {
       const done = () => {
         audio.removeEventListener("ended", done);
@@ -102,16 +103,31 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
     URL.revokeObjectURL(audio.src);
   }
 
-  function addLine(who, text, replacePrevious = false) {
+  function addLine(who, text, replacePrevious = false, durSec = 0) {
     if (replacePrevious) {
       const olds = logEl.querySelectorAll(".chat-line.you");
       olds[olds.length - 1]?.remove(); // the earlier part of what you said: now part of this longer line
     }
     const row = document.createElement("p");
     row.className = `chat-line ${who}`;
-    row.textContent = (who === "you" ? "You: " : `${name}: `) + text;
+    const prefix = who === "you" ? "You: " : `${name}: `;
     logEl.appendChild(row);
-    logEl.scrollTop = logEl.scrollHeight;
+    if (who !== "you") {
+      // the words appear as they are spoken: revealed across the length of the speech
+      const words = text.split(/\s+/).filter(Boolean);
+      const total = (Number.isFinite(durSec) && durSec > 0.3 ? durSec : words.length * 0.33) * 940;
+      const t0 = performance.now();
+      const tick = () => {
+        const f = Math.min(1, (performance.now() - t0) / total);
+        row.textContent = prefix + words.slice(0, Math.max(1, Math.round(words.length * f))).join(" ");
+        logEl.scrollTop = logEl.scrollHeight;
+        if (f < 1 && !destroyed) setTimeout(tick, 60);
+      };
+      tick();
+    } else {
+      row.textContent = prefix + text;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
   }
 
   /** Play a pre-made clip over the avatar; the mic is muted meanwhile so the chat does not hear it. */
@@ -185,7 +201,8 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
           meterBar.style.width = `${Math.min(100, v * 600)}%`;
           meterThr.style.left = `${Math.min(100, thr * 600)}%`;
         },
-        onLine: addLine,
+        onLine: (who, text, replace) => addLine(who, text, replace),
+        onSpeak: (text, secs) => addLine("avatar", text, false, secs),
       });
       await chat.start();
       muteBtn.disabled = false;
