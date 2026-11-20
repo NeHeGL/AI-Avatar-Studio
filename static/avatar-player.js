@@ -1,5 +1,5 @@
 import { createVoiceChat } from "/static/voice-chat.js?v=3";
-import { loadCinematic } from "/static/cinematic-clips.js?v=6";
+import { loadCinematic } from "/static/cinematic-clips.js?v=7";
 
 /**
  * The chat avatar: a photo-real face (live idle motion, pre-made clips, live reply videos) plus the voice chat.
@@ -120,7 +120,11 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
           statusEl.textContent = "Chat moved to another window — close the extra avatar tabs, then reload this one.";
           muteBtn.disabled = true;
         },
-        onStatus: (t) => !destroyed && (statusEl.textContent = t + chatBrainFoot),
+        onStatus: (t) => {
+          if (destroyed) return;
+          statusEl.textContent = t + chatBrainFoot;
+          if (/^Thinking/.test(t)) cinema?.settle(true); // the live face goes still so the reply video fades in from a match
+        },
         onLevel: (v, thr) => {
           meterBar.style.width = `${Math.min(100, v * 600)}%`;
           meterThr.style.left = `${Math.min(100, thr * 600)}%`;

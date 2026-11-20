@@ -57,6 +57,14 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   if (!figure) return null;
   figure.style.position = "relative";
 
+  // Base layer: the same prepared photo every clip and reply is made from, so size and framing always match.
+  const baseStill = new Image();
+  baseStill.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;z-index:0;pointer-events:none;";
+  baseStill.src = `${base}/cinematic/source.jpg`;
+  figure.appendChild(baseStill);
+  const rawStill = stageEl.querySelector("#avatar-still");
+  if (rawStill) rawStill.style.display = "none";
+
   const makeVideo = () => {
     const v = document.createElement("video");
     v.playsInline = true;
@@ -71,13 +79,16 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   let front = -1; // index of the layer currently showing, -1 = none yet
   let fadeTimer = 0;
 
-  // Live idle layer: the same photo, alive in real time (blinks, breathing, slow drift). It sits under the videos and is
-  // what you see whenever nothing is playing, so the face never freezes. If its service is not running we simply hold
-  // the last video frame instead.
+  // Live idle layer: the same photo, alive in real time (blinks, breathing, slow drift, yawns). It sits under the videos
+  // and is what you see whenever nothing is playing, so the face never freezes.
   const IDLE = opts.idleUrl || "http://localhost:8770";
   const slug = base.split("/").pop();
   let idleOk = false;
   let idleImg = null;
+  let idlePoll = 0;
+  let lastFrames = -1;
+  let stale = 0;
+  const streamUrl = () => `${IDLE}/stream?u=${Date.now()}`;
   function startIdle() {
     try {
       fetch(`${IDLE}/use?user=${encodeURIComponent(slug)}`, { method: "POST", mode: "no-cors" }).catch(() => {});
@@ -86,26 +97,63 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     }
     const img = new Image();
     img.style.cssText =
-      "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;z-index:0;opacity:0;transition:opacity .3s ease;pointer-events:none;";
-    img.onload = () => {
-      idleOk = true;
-      img.style.opacity = "1";
-    };
-    img.onerror = () => {
-      idleOk = false;
-      img.style.opacity = "0";
-    };
-    img.src = `${IDLE}/stream?u=${Date.now()}`;
+      "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;z-index:0;opacity:0;transition:opacity .45s ease;pointer-events:none;";
+    img.src = streamUrl();
     figure.appendChild(img);
     idleImg = img;
+    const poll = async () => {
+      try {
+        const r = await fetch(`${IDLE}/health`, { cache: "no-store" });
+        const j = await r.json();
+        idleOk = Boolean(j.ok && j.user === slug && j.frames > 0);
+        if (idleOk) {
+          stale = j.frames > lastFrames ? 0 : stale + 1;
+          lastFrames = j.frames;
+          if (stale >= 3) {
+            img.src = streamUrl(); // the stream stalled: reconnect
+            stale = 0;
+          }
+        }
+      } catch {
+        idleOk = false;
+      }
+      img.style.opacity = idleOk ? "1" : "0";
+    };
+    poll();
+    idlePoll = setInterval(poll, 1500);
   }
   startIdle();
+
+  /** Tell the live face what is on screen right now, so it carries on from that pose and expression (no jump). */
+  async function seedFromFront() {
+    const v = frontVideo();
+    if (!idleOk || !v || !v.videoWidth) return false;
+    try {
+      const c = document.createElement("canvas");
+      const k = Math.min(1, 512 / v.videoWidth);
+      c.width = Math.round(v.videoWidth * k);
+      c.height = Math.round(v.videoHeight * k);
+      c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+      const blob = await new Promise((res) => c.toBlob(res, "image/jpeg", 0.9));
+      const r = await fetch(`${IDLE}/seed`, { method: "POST", body: blob });
+      return Boolean((await r.json()).ok);
+    } catch {
+      return false;
+    }
+  }
+
+  /** on=true: the live face goes still and neutral (a reply is being prepared) so the reply video fades in from a match. */
+  function settle(on) {
+    if (!idleOk) return;
+    fetch(`${IDLE}/settle?on=${on ? 1 : 0}`, { method: "POST", mode: "no-cors" }).catch(() => {});
+  }
 
   /** Start `url` on the hidden layer, then fade it in over the one showing. Resolves with that video element. */
   async function startVideo(url) {
     const next = layers[front < 0 ? 0 : 1 - front];
     const old = front < 0 ? null : layers[front];
     clearTimeout(fadeTimer);
+    next.style.transition = "opacity .25s ease";
     next.style.opacity = "0";
     next.style.zIndex = "2";
     next.src = url;
@@ -162,7 +210,11 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
         current = null;
         if (idleOk) {
           clearTimeout(fadeTimer);
-          fadeTimer = setTimeout(() => release(), 700);
+          // hold the last frame for a moment, tell the live face what it looks like, then fade across to it
+          fadeTimer = setTimeout(async () => {
+            await seedFromFront();
+            release();
+          }, 500);
         }
         resolve(ok);
       };
@@ -203,7 +255,10 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
 
   /** Hide the photo layer (used when the animated face has to speak because no video was available). */
   function release() {
-    for (const v of layers) v.style.opacity = "0";
+    for (const v of layers) {
+      v.style.transition = "opacity .6s ease";
+      v.style.opacity = "0";
+    }
     front = -1;
   }
 
@@ -217,12 +272,15 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     get busy() {
       return Boolean(current);
     },
+    settle,
     get hasIdle() {
       return idleOk;
     },
     dispose() {
       clearTimeout(fadeTimer);
+      clearInterval(idlePoll);
       idleImg?.remove();
+      baseStill.remove();
       for (const v of layers) {
         try {
           v.pause();

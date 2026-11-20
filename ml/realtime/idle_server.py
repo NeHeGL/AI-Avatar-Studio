@@ -27,14 +27,15 @@ os.chdir(LP)  # LivePortrait resolves its weights relative to its own folder
 import cv2
 import numpy as np
 import torch
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.config.crop_config import CropConfig
 from src.config.inference_config import InferenceConfig
 from src.live_portrait_pipeline import LivePortraitPipeline
 from src.utils.crop import paste_back, prepare_paste_back
-from src.utils.retargeting_utils import calc_eye_close_ratio
+from src.utils.retargeting_utils import calc_eye_close_ratio, calc_lip_close_ratio
 
 OUT_PX = int(os.environ.get("IDLE_PX", "720"))  # longest side of the streamed picture
 
@@ -68,24 +69,52 @@ class Avatar:
         dev = self.w.device
         self.c_s_e = torch.from_numpy(calc_eye_close_ratio(self.src_lmk[None])).float().to(dev)
         self.eye_open_delta = self.w.retarget_eye(self.x_s, torch.cat([self.c_s_e, self.c_s_e.mean(dim=1, keepdim=True)], dim=1))
+        self.lip0 = float(calc_lip_close_ratio(self.src_lmk[None]).mean())
+        self.c_s_l = torch.from_numpy(calc_lip_close_ratio(self.src_lmk[None])).float().to(dev)
+        self.lip_rest_delta = self.w.retarget_lip(self.x_s, torch.cat([self.c_s_l, self.c_s_l], dim=1))
 
     @torch.no_grad()
-    def render(self, yaw=0.0, pitch=0.0, roll=0.0, dx=0.0, dy=0.0, blink=0.0) -> np.ndarray:
-        """blink 0..1 (1 = closed); angles in degrees. Returns an RGB picture the size of the source photo."""
+    def motion_of(self, rgb: np.ndarray):
+        """How this frame differs from the neutral photo (pose + expression), or None if no face is found."""
+        info = self.pipe.cropper.crop_source_image(rgb, CropConfig())
+        if info is None:
+            return None
+        k = self.w.get_kp_info(self.w.prepare_source(info["img_crop_256x256"]))
+        s = self.s_info
+        return {"exp": k["exp"] - s["exp"], "yaw": k["yaw"] - s["yaw"], "pitch": k["pitch"] - s["pitch"],
+                "roll": k["roll"] - s["roll"], "t": k["t"] - s["t"]}
+
+    @torch.no_grad()
+    def render(self, yaw=0.0, pitch=0.0, roll=0.0, dx=0.0, dy=0.0, blink=0.0, mouth=0.0, seed=None, w=0.0) -> np.ndarray:
+        """blink 0..1 (1 = closed), mouth 0..1 (1 = wide open); angles in degrees. Returns an RGB picture the size of the source photo."""
         info = {k: (v.clone() if isinstance(v, torch.Tensor) else v) for k, v in self.s_info.items()}
         info["yaw"] = info["yaw"] + yaw
         info["pitch"] = info["pitch"] + pitch
         info["roll"] = info["roll"] + roll
         info["t"][:, 0] += dx
         info["t"][:, 1] += dy
+        if seed is not None and w > 0.01:  # start from the pose/expression of the frame that was just on screen
+            info["exp"] = info["exp"] + w * seed["exp"]
+            info["yaw"] = info["yaw"] + w * seed["yaw"]
+            info["pitch"] = info["pitch"] + w * seed["pitch"]
+            info["roll"] = info["roll"] + w * seed["roll"]
+            info["t"] = info["t"] + w * seed["t"]
         x_d = self.w.transform_keypoint(info)
         if blink > 0.01:
             eye_t = torch.tensor([[self.eye0 * (1.0 - blink)]], device=self.w.device)
             x_d = x_d + self.w.retarget_eye(self.x_s, torch.cat([self.c_s_e, eye_t], dim=1)) - self.eye_open_delta
+        if mouth > 0.01:
+            lip_t = torch.tensor([[self.lip0 + 0.55 * mouth]], device=self.w.device)
+            x_d = x_d + self.w.retarget_lip(self.x_s, torch.cat([self.c_s_l, lip_t], dim=1)) - self.lip_rest_delta
         x_d = self.w.stitching(self.x_s, x_d)
         out = self.w.warp_decode(self.f_s, self.x_s, x_d)
         crop = self.w.parse_output(out["out"])[0]
         return paste_back(crop, self.crop_info["M_c2o"], self.src_rgb, self.mask)
+
+
+def smooth(x: float) -> float:
+    x = min(max(x, 0.0), 1.0)
+    return x * x * (3 - 2 * x)
 
 
 def bump(x: float) -> float:
@@ -106,16 +135,31 @@ class Idle:
         self.glance = None  # (start, duration, yaw, pitch)
         self.next_nod = self.t0 + rnd.uniform(9.0, 16.0)
         self.nod_start = None
+        self.next_yawn = self.t0 + rnd.uniform(45.0, 90.0)
+        self.yawn_start = None
         self.rnd = rnd
+        self.settle_until = 0.0
+        self.settle = False  # True while a reply is being prepared: stay quiet and neutral so the video fades in cleanly
+        self.amp = 1.0
+        self.last = self.t0
+
+    def trigger_yawn(self):
+        self.yawn_start = time.time()
 
     def state(self, now: float) -> dict:
         t = now - self.t0
         s = self.s
-        yaw = 1.6 * math.sin(0.31 * t + s[0]) + 0.8 * math.sin(0.77 * t + s[1])
-        pitch = 0.8 * math.sin(0.37 * t + s[2]) + 0.4 * math.sin(1.07 * t + s[3])
-        roll = 0.6 * math.sin(0.23 * t + s[4])
-        dy = 0.0035 * math.sin(2 * math.pi * t / 4.3 + s[5])  # breathing
-        dx = 0.002 * math.sin(0.19 * t + s[6])
+        if self.settle and now > self.settle_until:
+            self.settle = False
+        dt = max(0.0, now - self.last)
+        self.last = now
+        self.amp += ((0.0 if self.settle else 1.0) - self.amp) * min(1.0, dt / 0.5)  # ease into / out of the quiet mode
+        a = self.amp
+        yaw = a * (1.6 * math.sin(0.31 * t + s[0]) + 0.8 * math.sin(0.77 * t + s[1]))
+        pitch = a * (0.8 * math.sin(0.37 * t + s[2]) + 0.4 * math.sin(1.07 * t + s[3]))
+        roll = a * 0.6 * math.sin(0.23 * t + s[4])
+        dy = 0.0035 * math.sin(2 * math.pi * t / 4.3 + s[5])  # breathing never stops
+        dx = a * 0.002 * math.sin(0.19 * t + s[6])
 
         # blinks: every 2-5.5 s, sometimes doubled
         blink = 0.0
@@ -130,7 +174,7 @@ class Idle:
                 blink = math.sin(math.pi * p)
 
         # an occasional glance to one side and back
-        if self.glance is None and now >= self.next_glance:
+        if self.glance is None and not self.settle and now >= self.next_glance:
             self.glance = (now, self.rnd.uniform(0.9, 1.5), self.rnd.choice([-1, 1]) * self.rnd.uniform(3.0, 5.0), self.rnd.uniform(-1.2, 0.8))
         if self.glance:
             g0, gd, gy, gp = self.glance
@@ -143,7 +187,7 @@ class Idle:
                 pitch += gp * bump(x)
 
         # an occasional small nod
-        if self.nod_start is None and now >= self.next_nod:
+        if self.nod_start is None and not self.settle and now >= self.next_nod:
             self.nod_start = now
         if self.nod_start is not None:
             x = (now - self.nod_start) / 0.9
@@ -152,7 +196,23 @@ class Idle:
                 self.next_nod = now + self.rnd.uniform(10.0, 18.0)
             else:
                 pitch += 1.6 * bump(x)
-        return dict(yaw=yaw, pitch=pitch, roll=roll, dx=dx, dy=dy, blink=blink)
+        # an occasional yawn: head tips back, mouth opens wide, eyes screw shut, then everything relaxes
+        mouth = 0.0
+        if self.yawn_start is None and not self.settle and now >= self.next_yawn:
+            self.yawn_start = now
+        if self.yawn_start is not None:
+            x = (now - self.yawn_start) / 2.8
+            if x >= 1:
+                self.yawn_start = None
+                self.next_yawn = now + self.rnd.uniform(60.0, 140.0)
+            else:
+                open_ = bump(min(1.0, x / 0.82)) if x < 0.82 else 0.0  # rises, holds, closes
+                hold = 1.0 if 0.22 < x < 0.6 else (smooth(x / 0.22) if x <= 0.22 else smooth((0.82 - x) / 0.22))
+                mouth = 0.85 * max(0.0, hold)
+                blink = max(blink, 0.65 * max(0.0, hold))
+                pitch += 3.0 * max(0.0, hold)
+                roll += 0.8 * max(0.0, hold)
+        return dict(yaw=yaw, pitch=pitch, roll=roll, dx=dx, dy=dy, blink=blink, mouth=mouth)
 
 
 def main():
@@ -165,7 +225,7 @@ def main():
     inf = InferenceConfig()
     inf.flag_use_half_precision = True
     pipe = LivePortraitPipeline(inference_cfg=inf, crop_cfg=CropConfig())
-    state = {"avatar": None, "user": "", "n": 0, "jpg": b"", "times": []}
+    state = {"avatar": None, "user": "", "n": 0, "jpg": b"", "times": [], "seed": None, "seed_t": 0.0}
     cond = threading.Condition()
     idle = Idle()
 
@@ -189,7 +249,8 @@ def main():
                 continue
             now = time.time()
             try:
-                rgb = av.render(**idle.state(now))
+                w = math.exp(-(now - state["seed_t"]) / 2.2) if state["seed"] is not None else 0.0  # fades out over a few seconds
+                rgb = av.render(**idle.state(now), seed=state["seed"], w=w)
                 ok, buf = cv2.imencode(".jpg", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 90])
             except Exception as e:  # a bad frame must not kill the loop
                 print("render error:", e, flush=True)
@@ -207,12 +268,50 @@ def main():
 
     threading.Thread(target=loop, daemon=True).start()
     app = FastAPI()
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:8765", "http://127.0.0.1:8765"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/health")
     def health():
         t = state["times"]
         fps = (len(t) - 1) / (t[-1] - t[0]) if len(t) > 2 and t[-1] > t[0] else 0.0
         return {"ok": True, "user": state["user"], "fps": round(fps, 1), "frames": state["n"]}
+
+    @app.post("/seed")
+    async def seed(request: Request):
+        """Body = a JPEG of the frame that is on screen right now. The live face continues from that pose and expression."""
+        data = await request.body()
+        av = state["avatar"]
+        if av is None:
+            return {"ok": False}
+        bgr = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+        if bgr is None:
+            return {"ok": False}
+        m = av.motion_of(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+        if m is None:
+            return {"ok": False, "why": "no face"}
+        state["seed"], state["seed_t"] = m, time.time()
+        idle.settle = False
+        return {"ok": True}
+
+    @app.post("/settle")
+    def settle(on: int = 1):
+        """on=1: go quiet and neutral (a reply is being prepared); on=0: resume normal idling."""
+        idle.settle = bool(on)
+        idle.settle_until = time.time() + 25.0
+        if on:
+            state["seed"] = None
+        return {"ok": True, "settle": idle.settle}
+
+    @app.post("/trigger")
+    def trigger(what: str = "yawn"):
+        if what == "yawn":
+            idle.trigger_yawn()
+        return {"ok": True, "what": what}
 
     @app.post("/use")
     def use(user: str):
