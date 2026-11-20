@@ -1,5 +1,6 @@
 import { buildMeshFromScans, createMeshPuppet, meshFromLandmarks } from "/static/face-mesh-avatar.js?v=20";
 import { createVoiceChat } from "/static/voice-chat.js?v=2";
+import { loadCinematic } from "/static/cinematic-clips.js?v=1";
 
 
 /**
@@ -44,6 +45,7 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
   const meterBar = stageEl.querySelector("#chat-meter-bar");
   const meterThr = stageEl.querySelector("#chat-meter-thr");
   let chat = null;
+  let cinema = null; // pre-rendered full-quality clips (greeting / thinking), when the library exists
 
   let puppet = null;
   let rafId = 0;
@@ -223,6 +225,8 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
   /** Play one reply clip; the mouth follows it (loudness + vowel colour analysed up front). */
   async function playClip(blob) {
     if (destroyed) return;
+    clearTimeout(thinkingTimer);
+    await cinema?.whenIdle();
     try {
       analysis = await analyzeVoice(await blob.arrayBuffer());
     } catch (e) {
@@ -260,6 +264,26 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
 
   let chatBrainFoot = "";
 
+  /** Play a full-quality clip over the avatar; the mic is muted meanwhile so the chat does not hear it. */
+  async function playCinematic(kind) {
+    if (!cinema || destroyed) return false;
+    const wasMuted = chat ? chat.muted : false;
+    chat?.setMuted(true);
+    try {
+      return await cinema.play(kind);
+    } finally {
+      if (!wasMuted && !destroyed) chat?.setMuted(false);
+    }
+  }
+  let thinkingTimer = 0;
+  function onChatStatus(t) {
+    if (destroyed) return;
+    statusEl.textContent = t + chatBrainFoot;
+    clearTimeout(thinkingTimer);
+    // The reply takes a few seconds: look thoughtful for a moment instead of freezing.
+    if (cinema && /^Thinking/.test(t)) thinkingTimer = setTimeout(() => void playCinematic("thinking"), 600);
+  }
+
   async function startChat() {
     statusEl.textContent = "Loading the voice and speech models (the first time takes a minute)…";
     try {
@@ -282,7 +306,7 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
           statusEl.textContent = "Chat moved to another window — close the extra avatar tabs, then reload this one.";
           muteBtn.disabled = true;
         },
-        onStatus: (t) => !destroyed && (statusEl.textContent = t + chatBrainFoot),
+        onStatus: onChatStatus,
         onLevel: (v, thr) => {
           meterBar.style.width = `${Math.min(100, v * 600)}%`;
           meterThr.style.left = `${Math.min(100, thr * 600)}%`;
@@ -291,7 +315,8 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
       });
       await chat.start();
       muteBtn.disabled = false;
-      await chat.say(`Hello, I'm ${j.display_name || name}.`);
+      cinema = await loadCinematic(stageEl, profile).catch(() => null);
+      if (!(cinema && (await playCinematic("greeting")))) await chat.say(`Hello, I'm ${j.display_name || name}.`);
     } catch (e) {
       console.error(e);
       statusEl.textContent =
@@ -370,6 +395,8 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
     cancelAnimationFrame(rafId);
     audio?.pause();
     chat?.stop();
+    clearTimeout(thinkingTimer);
+    cinema?.dispose();
     try {
       puppet?.dispose?.();
     } catch {
