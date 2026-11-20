@@ -1,4 +1,4 @@
-import { createVoiceChat } from "/static/voice-chat.js?v=14";
+import { createVoiceChat } from "/static/voice-chat.js?v=16";
 import { loadCinematic } from "/static/cinematic-clips.js?v=30";
 
 /**

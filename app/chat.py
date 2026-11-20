@@ -71,7 +71,7 @@ def partial_text(audio_base64: str) -> str:
         return ""
     try:
         t0 = time.time()
-        text = ears({"raw": x, "sampling_rate": SR_IN}, generate_kwargs={"language": "en", "task": "transcribe"})["text"].strip()
+        text = ears({"raw": x[-25 * SR_IN:], "sampling_rate": SR_IN}, chunk_length_s=28, generate_kwargs={"language": "en", "task": "transcribe"})["text"].strip()
     finally:
         _lock.release()
     _log(f"live words ({len(x) / SR_IN:.1f}s of speech, {time.time() - t0:.2f}s): {text!r}")
@@ -556,7 +556,8 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
             t0 = time.time()
             with _lock:
                 ears = _state["ears"]
-                text = ears({"raw": x, "sampling_rate": SR_IN},
+                # chunk_length_s: recordings longer than Whisper's 30 s window are read in pieces instead of failing
+                text = ears({"raw": x, "sampling_rate": SR_IN}, chunk_length_s=28,
                             generate_kwargs={"language": "en", "task": "transcribe"})["text"].strip()
             _log(f"heard {text!r} in {time.time() - t0:.2f}s")
             if _is_phantom(text):

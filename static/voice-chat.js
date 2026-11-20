@@ -203,6 +203,7 @@ export function createVoiceChat(o) {
   }
 
   // Live words: while you talk, the speech so far is transcribed locally about once a second and shown as you go.
+  let loudMs = 0; // how much of this recording was clearly above the room noise
   let partialBusy = false;
   let lastPartialAt = 0;
   let partialGen = 0;
@@ -227,7 +228,8 @@ export function createVoiceChat(o) {
 
   function sendHeard(got) {
     if (mergePrev) {
-      got = [...mergePrev, ...got];
+      const secs = [...mergePrev, ...got].reduce((n, c) => n + c.length, 0) / ctx.sampleRate;
+      if (secs < 24) got = [...mergePrev, ...got]; // two parts of one question, as long as the whole fits what the ears can take
       mergePrev = null;
     }
     turnAudio = got;
@@ -285,6 +287,7 @@ export function createVoiceChat(o) {
       if (rms > threshold) lastLoudAt = performance.now();
       if (loud >= 2) {
         speaking = true;
+        loudMs = 0;
         if (busy && turnAudio && !replyStarted) {
           mergePrev = turnAudio; // still thinking: drop that reply, answer both parts together
           turnCtl?.abort();
@@ -298,6 +301,19 @@ export function createVoiceChat(o) {
     }
     chunks.push(new Float32Array(x));
     speechMs += ms;
+    if (rms > threshold * 1.6) loudMs += ms;
+    if (speechMs > 8000 && loudMs < speechMs * 0.2) {
+      // "speaking" for 8 s but almost never clearly above the room: that is noise (a fan, a hum), not you. Drop it and learn the room.
+      floor = Math.max(floor, rms * 0.5);
+      speaking = false;
+      partialGen++;
+      o.onPartial?.("");
+      chunks = [];
+      preroll = [];
+      loud = 0;
+      if (mergePrev) sendHeard([]);
+      return;
+    }
     livePartial();
     quietMs = rms < threshold * 0.8 ? quietMs + ms : 0;
     if (quietMs >= 1800 || speechMs > 25000) { // wait for a clear end: a short pause mid-sentence does not end the turn
