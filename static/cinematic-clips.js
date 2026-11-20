@@ -88,6 +88,9 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   let idlePoll = 0;
   let lastFrames = -1;
   let stale = 0;
+  let frameNo = 0;
+  let lastFrameAt = 0;
+  let stopFrames = () => {};
   const streamUrl = () => `${IDLE}/stream?u=${Date.now()}`;
   function startIdle() {
     try {
@@ -98,21 +101,25 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     const img = new Image();
     img.style.cssText =
       "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;z-index:0;opacity:0;transition:opacity .45s ease;pointer-events:none;";
-    img.src = streamUrl();
     figure.appendChild(img);
     idleImg = img;
+    // Pull the newest frame again and again (a live stream is flaky in some browsers).
+    let alive = true;
+    stopFrames = () => (alive = false);
+    const next = (delay) => setTimeout(() => alive && (img.src = `${IDLE}/frame.jpg?n=${++frameNo}`), delay);
+    img.onload = () => {
+      lastFrameAt = Date.now();
+      next(30);
+    };
+    img.onerror = () => next(600);
+    next(0);
     const poll = async () => {
       try {
         const r = await fetch(`${IDLE}/health`, { cache: "no-store" });
         const j = await r.json();
         idleOk = Boolean(j.ok && j.user === slug && j.frames > 0);
         if (idleOk) {
-          stale = j.frames > lastFrames ? 0 : stale + 1;
-          lastFrames = j.frames;
-          if (stale >= 3) {
-            img.src = streamUrl(); // the stream stalled: reconnect
-            stale = 0;
-          }
+          if (Date.now() - lastFrameAt > 3000) img.src = `${IDLE}/frame.jpg?n=${++frameNo}`; // frames stopped arriving: kick it
         }
       } catch {
         idleOk = false;
@@ -153,7 +160,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     const next = layers[front < 0 ? 0 : 1 - front];
     const old = front < 0 ? null : layers[front];
     clearTimeout(fadeTimer);
-    next.style.transition = "opacity .25s ease";
+    next.style.transition = "opacity .15s ease";
     next.style.opacity = "0";
     next.style.zIndex = "2";
     next.src = url;
@@ -256,7 +263,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   /** Hide the photo layer (used when the animated face has to speak because no video was available). */
   function release() {
     for (const v of layers) {
-      v.style.transition = "opacity .6s ease";
+      v.style.transition = "opacity .3s ease";
       v.style.opacity = "0";
     }
     front = -1;
@@ -279,6 +286,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     dispose() {
       clearTimeout(fadeTimer);
       clearInterval(idlePoll);
+      stopFrames();
       idleImg?.remove();
       baseStill.remove();
       for (const v of layers) {

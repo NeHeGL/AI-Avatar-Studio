@@ -29,7 +29,7 @@ import numpy as np
 import torch
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from src.config.crop_config import CropConfig
 from src.config.inference_config import InferenceConfig
@@ -321,6 +321,11 @@ def main():
             return {"ok": True, "user": user, "seconds": round(load(user), 1)}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=404)
+
+    @app.get("/frame.jpg")
+    def frame():
+        """The newest frame as a plain image (browsers handle this more reliably than a live stream)."""
+        return Response(state["jpg"], media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
     @app.get("/stream")
     def stream():
