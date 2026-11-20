@@ -256,7 +256,8 @@ export async function renderNameStep(root, onSubmit) {
   const chosen = () => (select && select.value !== "__new__" ? select.value : input.value.trim());
   const submit = () => {
     const name = chosen();
-    if (name) onSubmit(name);
+    const fromList = Boolean(select && select.value && select.value !== "__new__"); // picked from the list, not typed
+    if (name) onSubmit(name, fromList);
     else (select && select.value !== "__new__" ? select : input).focus();
   };
   if (select) {

@@ -47,7 +47,7 @@ function logOut() {
 }
 logoutBtn?.addEventListener("click", logOut);
 
-async function submitName(name) {
+async function submitName(name, fromList = false) {
   state.enteredName = name.trim();
   if (!state.enteredName) {
     alert("Please enter a name.");
@@ -57,7 +57,11 @@ async function submitName(name) {
   if (result.status === "exists") {
     setCinematicMode(false);
     state.profile = result.profile_summary;
-    renderExistsPrompt(result.message);
+    if (fromList) {
+      await confirmExisting(true); // picked from the list: nothing to confirm, open it
+    } else {
+      renderExistsPrompt(); // typed a name that is already taken
+    }
   } else if (result.status === "new") {
     state.canonicalName = state.enteredName;
     state.profile = emptyProfileSummary(state.canonicalName);
@@ -71,15 +75,15 @@ async function submitName(name) {
   }
 }
 
-function renderExistsPrompt(message) {
-  setPhase("Returning user?", message);
+function renderExistsPrompt() {
+  setPhase("", "");
   root.innerHTML = `
     <section class="card">
-      <p class="prompt">${escapeHtml(message)}</p>
+      <p class="prompt">A profile named &ldquo;${escapeHtml(state.enteredName)}&rdquo; already exists.</p>
       <ul class="sections-list" id="sections-overview"></ul>
       <div class="btn-row">
-        <button type="button" id="yes-you">Yes, that's me</button>
-        <button type="button" class="secondary" id="no-you">No</button>
+        <button type="button" id="yes-you">Open this profile</button>
+        <button type="button" class="secondary" id="no-you">Use a different name</button>
       </div>
     </section>
   `;
@@ -685,7 +689,7 @@ function boot() {
   updateLogout();
   renderHelloIntro(root, () => {
     setPhaseLabels(phaseLabel, statusHint, "", "");
-    renderNameStep(root, (name) => submitName(name));
+    renderNameStep(root, (name, fromList) => submitName(name, fromList));
   });
 }
 
