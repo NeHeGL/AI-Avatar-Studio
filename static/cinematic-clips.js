@@ -176,10 +176,21 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   }
   lookForMatte();
 
+  // Find out first whether saved waiting animations exist, so the very first picture is already the right one
+  // (no photo -> rest frame swap, no live face flashing in just to be hidden again).
+  let earlyBank = [];
+  try {
+    const r = await fetch(`${base}/cinematic/idle_bank/manifest.json`, { cache: "no-store" });
+    if (r.ok) earlyBank = (await r.json()).clips || [];
+  } catch {
+    /* none yet */
+  }
+  const bankFromStart = earlyBank.length >= 6;
+
   // Base layer: the same prepared photo every clip and reply is made from, so size and framing always match.
   const baseStill = new Image();
   baseStill.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;z-index:0;pointer-events:none;";
-  baseStill.src = `${base}/cinematic/source.jpg`;
+  baseStill.src = bankFromStart ? `${base}/cinematic/idle_bank/rest.jpg` : `${base}/cinematic/source.jpg`;
   fg.appendChild(baseStill);
   const rawStill = stageEl.querySelector("#avatar-still");
   if (rawStill) rawStill.style.display = "none";
@@ -217,13 +228,13 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     alphaVideo.style.opacity = on ? "1" : "0";
     fg.style.visibility = on ? "hidden" : "visible";
   };
-  let bank = [];
+  let bank = earlyBank;
   let bankPlaying = false;
   let mainActive = false; // a greeting / reply is on screen (or about to be)
   let mainIdleSince = Date.now(); // when the last greeting / reply sentence finished
   let lastDiag = 0;
   let thinkUntil = 0; // while a reply is being prepared: only thoughtful animations
-  let liveWanted = false;
+  let liveWanted = false; // with saved animations the live face stays hidden from the first moment (showLive is false while they exist)
   let bankTimer = 0;
   let resumeTimer = 0;
   let bankLoadTimer = 0;
@@ -387,6 +398,11 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   /** After a greeting or reply: let the live face carry on from the last frame, then settle back to the pre-made animations. */
   function backToBank() {
     clearTimeout(resumeTimer);
+    // ease the live face to the rest pose first (keeping the pose it just inherited fading out), so the cut is invisible
+    setTimeout(() => {
+      if (liveWanted && !mainActive) return;
+      fetch(`${IDLE}/settle?on=1&keep=1`, { method: "POST", mode: "no-cors" }).catch(() => {});
+    }, 1600);
     resumeTimer = setTimeout(() => {
       mainActive = false;
       if (bankOn()) {
@@ -394,6 +410,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
         bankVideo.style.opacity = "0";
         showAlpha(false);
         tickBank();
+        fetch(`${IDLE}/settle?on=0`, { method: "POST", mode: "no-cors" }).catch(() => {});
       }
     }, 3400);
   }
@@ -410,6 +427,8 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   let idleImg = null;
   let idlePoll = 0;
   let lastFrames = -1;
+  let lastClaim = 0;
+  let claims = 0;
   let stale = 0;
   let frameNo = 0;
   let lastFrameAt = 0;
@@ -443,8 +462,11 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
       try {
         const r = await fetch(`${IDLE}/health`, { cache: "no-store" });
         const j = await r.json();
-        if (j.ok && j.user !== slug && document.visibilityState === "visible") {
-          // the live-face service is holding someone else (another tab, a restart): take it back for this person
+        if (j.ok && j.user !== slug && document.hasFocus() && Date.now() - lastClaim > 20000 && claims < 3) {
+          // the live-face service is holding someone else (a restart, another tab): take it back, but only from the window
+          // being used, at most a few times, so two open tabs cannot trade it back and forth
+          lastClaim = Date.now();
+          claims += 1;
           fetch(`${IDLE}/use?user=${encodeURIComponent(slug)}`, { method: "POST", mode: "no-cors" }).catch(() => {});
         }
         idleOk = Boolean(j.ok && j.user === slug && (j.frames > 0 || (j.ready && j.live === false))); // paused is not the same as down

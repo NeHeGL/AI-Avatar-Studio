@@ -802,11 +802,12 @@ def main():
         return {"ok": True}
 
     @app.post("/settle")
-    def settle(on: int = 1):
-        """on=1: go quiet and neutral (a reply is being prepared); on=0: resume normal idling."""
+    def settle(on: int = 1, keep: int = 0):
+        """on=1: go quiet and neutral (a reply is being prepared); on=0: resume normal idling.
+        keep=1: calm down but keep easing out of the pose just inherited from a video (a smooth hand-back, no snap)."""
         idle.settle = bool(on)
         idle.settle_until = time.time() + 25.0
-        if on:
+        if on and not keep:
             state["seed"] = None
         return {"ok": True, "settle": idle.settle}
 
