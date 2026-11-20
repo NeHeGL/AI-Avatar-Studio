@@ -31,39 +31,3 @@ def _model() -> Path | None:
         if cand and Path(cand).exists():
             return Path(cand)
     return None
-
-
-def landmarks_for(image_path: str | Path) -> dict:
-    """Return {"w","h","landmarks":[[x,y,z]…]} for the photo, or {"error": "..."}."""
-    image = Path(image_path)
-    if not image.exists():
-        return {"error": f"image not found: {image.name}"}
-    sidecar = image.with_suffix(".lm.json")
-    if sidecar.exists() and sidecar.stat().st_mtime >= image.stat().st_mtime:
-        try:
-            return json.loads(sidecar.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            pass
-    py, model = _python(), _model()
-    if py is None or model is None:
-        return {"error": "landmark helper unavailable (need a Python with mediapipe and the face_landmarker.task model)"}
-    try:
-        proc = subprocess.run(
-            [str(py), str(SCRIPT), str(image), str(model)],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        lines = [ln for ln in proc.stdout.strip().splitlines() if ln.startswith("{")]
-        data = json.loads(lines[-1]) if lines else {"error": (proc.stderr or "no output").strip()[-200:]}
-    except subprocess.TimeoutExpired:
-        return {"error": "landmark detection timed out"}
-    except (OSError, ValueError) as exc:
-        return {"error": f"landmark detection failed: {exc}"}
-    if "landmarks" in data:
-        try:
-            sidecar.write_text(json.dumps(data), encoding="utf-8")
-        except OSError:
-            pass
-    return data

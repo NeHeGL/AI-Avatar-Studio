@@ -29,16 +29,29 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   const base = (sample.match(/^(.*\/media\/[^/]+)\//) || [])[1];
   if (!base) return null;
 
-  let manifest;
+  // The server prepares the person's photo (from whatever scan photos exist) and says if a clip library exists.
+  let prep = null;
   try {
-    const r = await fetch(`${base}/cinematic/manifest.json`, { cache: "no-store" });
-    if (!r.ok) return null;
-    manifest = await r.json();
+    const r = await fetch("/api/photoreal/prepare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ canonical_name: profile.canonical_name }),
+    });
+    prep = await r.json();
   } catch {
     return null;
   }
+  if (!prep?.has_source) return null;
+  let manifest = { clips: [] };
+  if (prep.has_clips) {
+    try {
+      const r = await fetch(`${base}/cinematic/manifest.json`, { cache: "no-store" });
+      if (r.ok) manifest = await r.json();
+    } catch {
+      /* no clips: the idle face and the reply videos still work */
+    }
+  }
   const clips = (manifest.clips || []).filter((c) => c.video);
-  if (!clips.length) return null;
 
   const figure = stageEl.querySelector("#avatar");
   if (!figure) return null;

@@ -15,9 +15,7 @@ from fastapi.responses import FileResponse, RedirectResponse, Response, Streamin
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import capture, chat, landmarks, walkthrough
-from app.profile_logic import face_assets, pick_avatar_face
-from app.storage import get_working_profile
+from app import capture, chat, walkthrough
 from app.storage import list_saved_names
 from app.storage import DATA_ROOT, purge_unsaved_user_files, seed_demo_user
 
@@ -343,23 +341,6 @@ def api_voice(body: VoiceBody) -> dict:
     return capture.ingest_voice(body.canonical_name, body.audio_base64, body.label)
 
 
-class LandmarkBody(BaseModel):
-    canonical_name: str
-
-
-@app.post("/api/avatar/landmarks")
-def api_avatar_landmarks(body: LandmarkBody) -> dict:
-    """Landmarks for the profile's best straight-on photo (found server-side, cached)."""
-    profile = get_working_profile(body.canonical_name)
-    face = pick_avatar_face(face_assets(profile))
-    if face is None:
-        return {"status": "error", "message": "No face photo yet — do the face scan first."}
-    data = landmarks.landmarks_for(face.path)
-    if "landmarks" not in data:
-        return {"status": "error", "message": data.get("error", "no face found")}
-    return {"status": "ok", "url": walkthrough.media_url(face.path), "caption": face.caption, **data}
-
-
 @app.post("/api/capture/other")
 def api_other(body: OtherBody) -> dict:
     return capture.ingest_other(body.canonical_name, body.display_name, body.notes)
@@ -381,6 +362,18 @@ class ChatTurnBody(BaseModel):
     say: str | None = None
     token: str | None = None
     nudge: int | None = None  # 1..4: the model speaks up because the room went quiet
+
+
+class PrepareBody(BaseModel):
+    canonical_name: str
+
+
+@app.post("/api/photoreal/prepare")
+def api_photoreal_prepare(body: PrepareBody) -> dict:
+    """Make sure this person has a prepared photo for the photo-real layers; says what else exists (clip library)."""
+    from app import photoreal
+
+    return photoreal.status(body.canonical_name)
 
 
 @app.get("/api/chat/brain")
