@@ -39,6 +39,19 @@ PHANTOMS = {
     "okay", "ok", "oh", "uh", "um", "hmm", "mm", "mhm", "the", "so", "yeah", "i'm sorry", ".", "...",
 }
 
+def _is_phantom(text: str) -> bool:
+    """Whisper invents text from silence/noise: a stock phrase, or the same short sentence repeated over and over."""
+    norm = lambda t: t.lower().strip(" .!?,")  # noqa: E731
+    stock = {norm(p) for p in PHANTOMS}
+    if len(text) < 2 or norm(text) in stock:
+        return True
+    parts = [norm(x) for x in re.split(r"[.!?]+", text) if norm(x)]
+    if len(parts) >= 3 and len(set(parts)) <= max(1, len(parts) // 4):  # one phrase repeated
+        return True
+    words = re.findall(r"[a-z']+", text.lower())
+    return len(words) >= 8 and len(set(words)) <= 3
+
+
 _lock = threading.Lock()  # one GPU job at a time
 _state = {"ears": None, "tts": None, "voice_key": None, "loading": False}
 _sessions: dict[str, "Session"] = {}
@@ -407,7 +420,7 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
                 text = ears({"raw": x, "sampling_rate": SR_IN},
                             generate_kwargs={"language": "en", "task": "transcribe"})["text"].strip()
             _log(f"heard {text!r} in {time.time() - t0:.2f}s")
-            if text.lower().strip(" .!?,") in {p.strip(" .!?,") for p in PHANTOMS} or len(text) < 2:
+            if _is_phantom(text):
                 yield _ev(type="ignored", reason="noise", text=text)
                 yield _ev(type="done")
                 return
