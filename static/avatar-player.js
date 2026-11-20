@@ -34,7 +34,6 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
       <button type="button" class="btn-primary" id="chat-mute" disabled>Mute mic</button>
       <button type="button" class="btn-ghost" id="back-profile">Back to profile</button>
     </div>
-    <label class="avatar-opt" style="display:block;margin-top:.6rem;font-size:.85rem;opacity:.75;"><input type="checkbox" id="use-3d"> Try 3D stitched skin (experimental — 2D warp is default)</label>
   `;
 
   const audio = stageEl.querySelector("#avatar-audio");
@@ -301,20 +300,6 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
     }
   }
 
-  const use3dBox = stageEl.querySelector("#use-3d");
-  try {
-    if (use3dBox) use3dBox.checked = localStorage.getItem("avatar3d") === "1";
-  } catch {
-    /* ignore */
-  }
-  use3dBox?.addEventListener("change", () => {
-    try {
-      localStorage.setItem("avatar3d", use3dBox.checked ? "1" : "0");
-    } catch {
-      /* ignore */
-    }
-    location.reload(); // the avatar is rebuilt with the chosen head
-  });
   stageEl.querySelector("#back-profile")?.addEventListener("click", () => hooks.onBackProfile?.());
 
   muteBtn?.addEventListener("click", () => {
@@ -336,53 +321,6 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
   (async () => {
     try {
       if (!frames.length) throw new Error("No scan photos yet — do the face scan first.");
-      // Preferred: the scanned skin texture on the 3D face mesh from the face scan.
-      const scanBase = ((profile.avatar_face_url || frames[0]?.url || "").match(/^(.*\/scan)\//) || [])[1] || "";
-      let use3d = false;
-      try {
-        use3d = localStorage.getItem("avatar3d") === "1";
-      } catch {
-        use3d = false;
-      }
-      if (scanBase) {
-        try {
-          const pr = await fetch(`${scanBase}/skin_stitched.png`, { method: "HEAD" });
-          use3d = use3d && pr.ok;
-        } catch {
-          use3d = false;
-        }
-      } else use3d = false;
-      const use3dBox = stageEl.querySelector("#use-3d");
-      if (use3dBox) use3dBox.checked = use3d;
-      if (scanBase && use3d) {
-        try {
-          statusEl.textContent = "Building your 3D face from the scan…";
-          stageEl.querySelector("#avatar")?.classList.add("portrait-3d");
-          const mod = await import("/static/avatar-3d.js?v=4");
-          let hero = null; // the front-facing scan photo and its landmarks: used for the head shell, hair and eye colour
-          try {
-            const hr = await fetch("/api/avatar/landmarks", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ canonical_name: profile.canonical_name }),
-            });
-            const hj = await hr.json();
-            if (hj.status === "ok") hero = hj;
-          } catch (e2) {
-            console.warn("hero landmarks unavailable:", e2);
-          }
-          puppet = await mod.createSkinHeadPuppet(canvas, scanBase, hero);
-        } catch (e) {
-          console.warn("3D skin face unavailable, using the photo puppet instead:", e);
-          puppet = null;
-        }
-      }
-      if (puppet) {
-        if (destroyed) return;
-        rafId = requestAnimationFrame(frame);
-        void startChat();
-        return;
-      }
       // Preferred: landmarks found on the server (works in every browser). Fallback: in-browser detection.
       let mesh = null;
       try {
