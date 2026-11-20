@@ -18,10 +18,34 @@ async function api(path, body) {
   return res.json();
 }
 
+const logoutBtn = document.getElementById("logout-btn");
+
+/** The Log out button shows whenever someone is signed in (a name has been chosen). */
+function updateLogout() {
+  if (logoutBtn) logoutBtn.hidden = !state.canonicalName;
+}
+
 function setPhase(label, hint = "") {
   phaseLabel.textContent = label;
   statusHint.textContent = hint;
+  updateLogout();
 }
+
+/** Leave the current person: stop the chat and the microphone, forget who was chosen, go back to the start (name) screen. */
+function logOut() {
+  if (talkInterval) clearInterval(talkInterval);
+  if (avatarTeardown) {
+    avatarTeardown();
+    avatarTeardown = null;
+  }
+  state.enteredName = "";
+  state.canonicalName = "";
+  state.profile = null;
+  setCinematicMode(false);
+  updateLogout();
+  boot();
+}
+logoutBtn?.addEventListener("click", logOut);
 
 async function submitName(name) {
   state.enteredName = name.trim();
@@ -658,6 +682,7 @@ import {
 } from "/static/onboarding-flow.js";
 
 function boot() {
+  updateLogout();
   renderHelloIntro(root, () => {
     setPhaseLabels(phaseLabel, statusHint, "You", "");
     renderNameStep(root, (name) => submitName(name));
