@@ -9,7 +9,7 @@
 import { estimateHeadPose, scoreCapture } from "/static/face-pose.js?v=25";
 
 const CAPTURE_PX = 640;
-const SCAN_WIDE = 1.9; // saved scan photos include hair, ears and neck around the on-screen circle
+const SCAN_WIDE = 1.5; // saved scan photos include hair, ears and neck around the on-screen circle
 const FRONTAL_PX = 1024;
 const BASELINE_FRAMES = 20;
 const CAPTURE_INTERVAL_MS = 110;
@@ -1473,16 +1473,26 @@ export async function runFaceScan(root, canonicalName, api) {
       video.srcObject = stream;
       await video.play();
     }
-    const { createCameraFraming } = await import("/static/camera-framing.js?v=31");
+    const { createCameraFraming } = await import("/static/camera-framing.js?v=33");
     framing = await createCameraFraming(video, videoWrap, null, {
       mode: "face",
       steadyFrame: false,
       scanMode: true,
+      fillWide: SCAN_WIDE,
       onLandmarks: onFrame,
       onStatus: (msg) => {
         liveEl.textContent = msg;
       },
     });
+    // Show the whole area that gets saved (SCAN_WIDE x the circle), not just its centre: same box size, wider view.
+    const panEl = videoWrap.querySelector(".scan-video-pan");
+    if (panEl && !panEl.parentElement.classList.contains("scan-wide-view")) {
+      const wideView = document.createElement("div");
+      wideView.className = "scan-wide-view";
+      wideView.style.cssText = `position:absolute;inset:0;transform:scale(${1 / SCAN_WIDE});transform-origin:center center`;
+      panEl.parentElement.insertBefore(wideView, panEl);
+      wideView.appendChild(panEl);
+    }
     const poll = setInterval(() => {
       if (settled) return clearInterval(poll);
       if (framing?.isModelReady) {

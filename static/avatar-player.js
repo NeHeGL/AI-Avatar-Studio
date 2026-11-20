@@ -1,4 +1,4 @@
-import { createVoiceChat } from "/static/voice-chat.js?v=6";
+import { createVoiceChat } from "/static/voice-chat.js?v=14";
 import { loadCinematic } from "/static/cinematic-clips.js?v=27";
 
 /**
@@ -102,7 +102,11 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
     URL.revokeObjectURL(audio.src);
   }
 
-  function addLine(who, text) {
+  function addLine(who, text, replacePrevious = false) {
+    if (replacePrevious) {
+      const olds = logEl.querySelectorAll(".chat-line.you");
+      olds[olds.length - 1]?.remove(); // the earlier part of what you said: now part of this longer line
+    }
     const row = document.createElement("p");
     row.className = `chat-line ${who}`;
     row.textContent = (who === "you" ? "You: " : `${name}: `) + text;
@@ -115,9 +119,11 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
     if (!cinema || destroyed) return false;
     const wasMuted = chat ? chat.muted : false;
     chat?.setMuted(true);
+    chat?.deafFor?.(180000); // a clip is playing: it is the avatar's turn (typing blocked too)
     try {
       return await cinema.play(kind);
     } finally {
+      chat?.deafFor?.(1500); // the clip's sound is still fading out of the room
       if (!wasMuted && !destroyed) chat?.setMuted(false);
     }
   }
@@ -147,6 +153,33 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
           if (destroyed) return;
           statusEl.textContent = t + chatBrainFoot;
           if (/^Thinking/.test(t)) cinema?.settle(true); // the live face goes still so the reply video fades in from a match
+        },
+        onPartial: (t) => {
+          // what you are saying appears in the message box as you talk; when you stop it goes (the turn is sent) and the
+          // line shows up in the conversation above
+          const input = stageEl.querySelector("#chat-input");
+          if (!input) return;
+          if (!t) {
+            if (input.dataset.live === "1") {
+              input.value = "";
+              input.dataset.live = "";
+            }
+            return;
+          }
+          if (input.value && input.dataset.live !== "1") return; // never overwrite something typed
+          input.value = t;
+          input.dataset.live = "1";
+          input.scrollLeft = input.scrollWidth; // keep the newest words in view, like typing
+        },
+        onState: ({ listening, canType }) => {
+          const input = stageEl.querySelector("#chat-input");
+          const send = stageEl.querySelector("#chat-type button");
+          if (input) {
+            input.disabled = !canType;
+            input.placeholder = canType ? "…or type a message" : "Wait for your turn…";
+          }
+          if (send) send.disabled = !canType;
+          stageEl.querySelector(".chat-meter")?.style.setProperty("outline", listening ? "2px solid #3ddc84" : "none");
         },
         onLevel: (v, thr) => {
           meterBar.style.width = `${Math.min(100, v * 600)}%`;
@@ -179,7 +212,7 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
     e.preventDefault();
     const input = stageEl.querySelector("#chat-input");
     const t = input.value.trim();
-    if (t && chat) {
+    if (t && chat && !input.disabled) {
       input.value = "";
       void chat.sendText(t);
     }

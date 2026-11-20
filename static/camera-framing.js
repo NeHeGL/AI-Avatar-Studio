@@ -31,7 +31,18 @@ export async function createCameraFraming(video, container, hintEl, options = {}
   let lastNose = null;
   let onLandmarks = options.onLandmarks ?? null;
 
+  // fillWide > 1: the view shows fillWide x the box, so never zoom out or slide the picture far enough to expose its edges
+  const fillWide = options.fillWide > 1 ? options.fillWide : 0;
   function applyTransform(scale, tx, ty) {
+    if (fillWide) {
+      const ov = mode === "body" ? 1.2 : 1.22;
+      scale = Math.max(scale, fillWide / ov);
+      const k = (ov * scale - fillWide) / 2;
+      const mx = k * container.clientWidth;
+      const my = k * container.clientHeight;
+      tx = Math.min(mx, Math.max(-mx, tx));
+      ty = Math.min(my, Math.max(-my, ty));
+    }
     lastTransform = { scale, tx, ty };
     pan.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
   }
@@ -244,6 +255,13 @@ export async function createCameraFraming(video, container, hintEl, options = {}
     } else {
       if (box.w > 0.4) scaleTarget = Math.min(scaleTarget, 0.95);
       scaleTarget = Math.min(1.18, Math.max(0.92, scaleTarget));
+    }
+    if (scanMode && fillWide) {
+      // Fixed view: the whole scene is shown and saved, so nothing follows or zooms on the face.
+      applyTransform(0, 0, 0); // clamped up to the smallest zoom that fills the box
+      settledFrames++; // "settled" = a face has been seen steadily
+      rafId = requestAnimationFrame(tick);
+      return;
     }
     if (scanMode) {
       // Closed loop: measure where the face ACTUALLY is in the circle (same

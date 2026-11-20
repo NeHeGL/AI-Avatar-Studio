@@ -263,7 +263,7 @@ function renderUpdateAvatarScreen() {
 async function runUpdateSection(section) {
   setCinematicMode(true);
   if (section === "scan") {
-    const { runFaceScan } = await import("/static/orbit-scan.js?v=35");
+    const { runFaceScan } = await import("/static/orbit-scan.js?v=41");
     const result = await runFaceScan(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if (section === "voice") {
@@ -498,7 +498,7 @@ async function renderAvatar(result, afterUpdate = false) {
   const mode = result?.avatar_mode || (profile?.avatar_ready ? "live" : "placeholder");
   root.innerHTML = `<section class="card avatar-stage" id="avatar-stage"></section>`;
   const stage = document.getElementById("avatar-stage");
-  const { mountAvatarPlayer } = await import("/static/avatar-player.js?v=82");
+  const { mountAvatarPlayer } = await import("/static/avatar-player.js?v=91");
   avatarTeardown = mountAvatarPlayer(stage, profile || {}, {
     onBackProfile: () => {
       avatarTeardown?.();
@@ -583,7 +583,7 @@ function renderNewUserFlow() {
 }
 
 async function runScanFlow() {
-  const { runFaceScan } = await import("/static/orbit-scan.js?v=35");
+  const { runFaceScan } = await import("/static/orbit-scan.js?v=41");
   const result = await runFaceScan(root, state.canonicalName, api);
   if (result?.profile) {
     state.profile = result.profile;

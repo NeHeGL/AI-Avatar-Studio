@@ -189,7 +189,7 @@ def emotion_table(device) -> dict:
 
 
 RENDER_LOCK = threading.RLock()
-REST_BLINK = -0.22  # < 0 = eyes slightly wider than in the photo; every animation is relative to this rest face
+REST_BLINK = 0.0  # eyes exactly as in the photo (was -0.22: eyes slightly wider than the photo, which looked startled)
 
 MATTE_MODEL = HERE / "models" / "u2net_human_seg.onnx"
 

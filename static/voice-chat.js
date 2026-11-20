@@ -87,15 +87,26 @@ export function createVoiceChat(o) {
   let nudges = 0;
   let lastActive = performance.now();
   let nudgeTimer = 0;
+  let lastLoudAt = 0; // any sound above the room noise: it does not start talking on its own while you may be about to speak
   function maybeNudge() {
-    if (stopped || busy || muted || speaking || nudges >= quietGaps.length) return;
+    if (stopped || busy || muted || speaking || loud > 0 || performance.now() - lastLoudAt < 6000 || nudges >= quietGaps.length) return;
     if (performance.now() - lastActive < quietGaps[nudges] * 1000 * (0.75 + Math.random() * 0.5)) return;
     nudges += 1;
     void runTurn({ nudge: nudges });
   }
 
+  // While it is still THINKING (nothing spoken yet) you can carry on talking: the reply in progress is dropped and your
+  // two parts are sent together as one question.
+  let turnAudio = null; // the recorded chunks of the turn being answered (null for typed / self-started turns)
+  let replyStarted = false;
+  let turnCtl = null;
+  let mergePrev = null;
+  let heardShown = false; // this turn's "You: ..." line is already on screen
+  let replacePrev = false; // the next "You: ..." line replaces the previous one (its turn was dropped and merged)
+
   async function post(body, onEvent) {
     const res = await fetch("/api/chat/turn", {
+      signal: turnCtl?.signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ canonical_name: o.name, token: o.token, ...body }),
@@ -117,16 +128,17 @@ export function createVoiceChat(o) {
         if (!line) continue;
         const ev = JSON.parse(line);
         if (ev.type === "say") {
-          o.onLine("avatar", ev.text);
+          replyStarted = true;
           const blob = b64ToBlob(ev.audio, "audio/wav");
           chain = chain.then(async () => {
             if (stopped) return null;
             voiceOut = true;
+            o.onLine("avatar", ev.text); // the words appear when they start being spoken, not when they were written
             try {
               return await o.playClip(blob, ev.video_url || "");
             } finally {
               voiceOut = false;
-              voiceOutUntil = performance.now() + 1100; // its own voice fades out of the room
+              voiceOutUntil = performance.now() + 1500; // its own voice fades out of the room
             }
           });
         } else {
@@ -141,6 +153,10 @@ export function createVoiceChat(o) {
     let engaged = Boolean(body.text); // something typed counts; heard speech counts once it has been accepted (see below)
     if (engaged) nudges = 0;
     busy = true;
+    replyStarted = false;
+    heardShown = false;
+    turnCtl = new AbortController();
+    let aborted = false;
     o.onStatus("Thinking…");
     let failed = "";
     try {
@@ -149,12 +165,23 @@ export function createVoiceChat(o) {
         if (ev.type === "heard") {
           engaged = true;
           nudges = 0; // you really said something
-          o.onLine("you", ev.text);
+          heardShown = true;
+          o.onLine("you", ev.text, replacePrev); // a merged turn replaces the line of the part that was dropped
+          replacePrev = false;
         }
         if (ev.type === "error") failed = ev.message;
       });
     } catch (e) {
-      failed = e.message || String(e);
+      if (e?.name === "AbortError") aborted = true;
+      else failed = e.message || String(e);
+    }
+    turnAudio = null;
+    turnCtl = null;
+    if (aborted) {
+      if (heardShown) replacePrev = true;
+      busy = false;
+      resumeAt = 0;
+      return; // you kept talking: the new recording carries both parts
     }
     if (superseded) {
       api.stop();
@@ -172,12 +199,52 @@ export function createVoiceChat(o) {
       return;
     }
     pending = [];
-    if (!failed && !stopped) o.onStatus(muted ? "Mic muted." : "Listening… just talk.");
+    lastState = ""; // report the new state on the next audio tick
+  }
+
+  // Live words: while you talk, the speech so far is transcribed locally about once a second and shown as you go.
+  let partialBusy = false;
+  let lastPartialAt = 0;
+  let partialGen = 0;
+  function livePartial() {
+    const now = performance.now();
+    if (partialBusy || now - lastPartialAt < 800 || speechMs < 500) return;
+    lastPartialAt = now;
+    partialBusy = true;
+    const gen = partialGen;
+    const wav = encodeWav16k(chunks.slice(), ctx.sampleRate);
+    blobToBase64(wav)
+      .then((b64) => fetch("/api/chat/partial", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audio_base64: b64 }) }))
+      .then((r) => r.json())
+      .then((j) => {
+        if (gen === partialGen && speaking && j.text) o.onPartial?.(j.text);
+      })
+      .catch(() => {})
+      .finally(() => {
+        partialBusy = false;
+      });
   }
 
   function sendHeard(got) {
+    if (mergePrev) {
+      got = [...mergePrev, ...got];
+      mergePrev = null;
+    }
+    turnAudio = got;
     const wav = encodeWav16k(got, ctx.sampleRate);
     blobToBase64(wav).then((b64) => runTurn({ audio_base64: b64 }));
+  }
+
+  // Strict turns: while the avatar is thinking, talking or playing a clip the mic records nothing and typing is blocked.
+  let lastState = "";
+  function reportState() {
+    const ownVoice = voiceOut || performance.now() < voiceOutUntil;
+    const wait = busy || ownVoice;
+    const st = wait ? "wait" : muted ? "muted" : performance.now() < resumeAt ? "wait" : "listen";
+    if (st === lastState) return;
+    lastState = st;
+    o.onState?.({ listening: st === "listen", canType: !wait && st !== "wait" });
+    if (st === "listen") o.onStatus("🎤 Your turn — I'm listening");
   }
 
   function onAudio(e) {
@@ -189,9 +256,13 @@ export function createVoiceChat(o) {
     const ownVoice = voiceOut || performance.now() < voiceOutUntil;
     const threshold = Math.max(0.01, floor * 3.2);
     o.onLevel(rms, threshold);
-    if (ownVoice) {
-      // its own voice is coming out of the speakers: record nothing (it would hear itself and answer itself)
+    reportState();
+    const canInterrupt = busy && turnAudio && !replyStarted && !voiceOut;
+    if (ownVoice || (busy && !canInterrupt)) {
+      // it is thinking or its own voice is coming out of the speakers: record nothing (no talking over each other, no echo)
       speaking = false;
+      partialGen++;
+      o.onPartial?.("");
       chunks = [];
       preroll = [];
       loud = 0;
@@ -199,34 +270,49 @@ export function createVoiceChat(o) {
     }
     if (muted || (!busy && performance.now() < resumeAt)) {
       speaking = false;
+      partialGen++;
+      o.onPartial?.("");
       chunks = [];
+      preroll = []; // nothing from while it was muted (or still echoing) may leak into the next recording
       loud = 0;
       return;
     }
     if (!speaking) {
       if (rms < threshold) floor = floor * 0.97 + rms * 0.03; // learn the room only while it is quiet
       preroll.push(new Float32Array(x));
-      if (preroll.length > 4) preroll.shift();
+      if (preroll.length > 16) preroll.shift(); // ~0.7 s kept from before the trigger so the start of a sentence is not clipped
       loud = rms > threshold ? loud + 1 : 0;
+      if (rms > threshold) lastLoudAt = performance.now();
       if (loud >= 2) {
         speaking = true;
+        if (busy && turnAudio && !replyStarted) {
+          mergePrev = turnAudio; // still thinking: drop that reply, answer both parts together
+          turnCtl?.abort();
+        }
         chunks = [...preroll];
         speechMs = 0;
         quietMs = 0;
-        if (!busy) o.onStatus("Hearing you…");
+        o.onStatus("Hearing you…");
       }
       return;
     }
     chunks.push(new Float32Array(x));
     speechMs += ms;
+    livePartial();
     quietMs = rms < threshold * 0.8 ? quietMs + ms : 0;
-    if (quietMs >= 900 || speechMs > 25000) {
+    if (quietMs >= 1800 || speechMs > 25000) { // wait for a clear end: a short pause mid-sentence does not end the turn
       const got = chunks;
+      partialGen++;
+      o.onPartial?.("");
       speaking = false;
       chunks = [];
       preroll = [];
       loud = 0;
       if (speechMs - quietMs < 350) {
+        if (mergePrev) {
+          sendHeard([]); // that was only a click or cough: answer the part that was dropped
+          return;
+        }
         if (!busy) o.onStatus("Listening… just talk.");
         return; // a click or cough
       }
@@ -254,7 +340,7 @@ export function createVoiceChat(o) {
       src.connect(node);
       node.connect(sink);
       sink.connect(ctx.destination);
-      o.onStatus("Listening… just talk.");
+      o.onStatus("🎤 Your turn — I'm listening");
       nudgeTimer = setInterval(maybeNudge, 1000);
     },
     say: (text) => runTurn({ say: text }),
@@ -263,7 +349,14 @@ export function createVoiceChat(o) {
       lastActive = performance.now();
       nudges = 0;
     },
-    sendText: (text) => runTurn({ text }),
+    sendText: (text) => {
+      if (busy || voiceOut || performance.now() < voiceOutUntil) return; // wait for your turn
+      return runTurn({ text });
+    },
+    /** Stay deaf for ms more (e.g. after a pre-made clip ends and its sound is still fading out of the room). */
+    deafFor(ms) {
+      voiceOutUntil = performance.now() + ms;
+    },
     setMuted(m) {
       muted = m;
       o.onStatus(m ? "Mic muted." : "Listening… just talk.");

@@ -408,6 +408,19 @@ def api_chat_start(body: ChatStartBody) -> dict:
     return chat.start(body.canonical_name)
 
 
+class ChatPartialBody(BaseModel):
+    audio_base64: str
+
+
+@app.post("/api/chat/partial")
+def api_chat_partial(body: ChatPartialBody) -> dict:
+    """Live words while the person is still speaking (local Whisper on the audio so far)."""
+    try:
+        return {"text": chat.partial_text(body.audio_base64)}
+    except Exception:
+        return {"text": ""}
+
+
 @app.post("/api/chat/turn")
 def api_chat_turn(body: ChatTurnBody) -> StreamingResponse:
     """NDJSON stream: heard -> say (one per sentence, with WAV audio) -> done."""

@@ -53,6 +53,31 @@ def _is_phantom(text: str) -> bool:
 
 
 _lock = threading.Lock()  # one GPU job at a time
+def partial_text(audio_base64: str) -> str:
+    """Quick live transcript of what is being said right now (shown while the person is still talking). Never queues behind
+    other GPU work: if the GPU is busy it just skips this round. Nothing is stored and nothing leaves the machine."""
+    import soundfile as sf
+
+    ears = _state.get("ears")
+    if ears is None:
+        return ""
+    raw = base64.b64decode(audio_base64.split(",", 1)[-1])
+    x, _sr = sf.read(io.BytesIO(raw), dtype="float32", always_2d=True)
+    x = x.mean(axis=1)
+    if len(x) < SR_IN * 0.5 or float(np.sqrt((x ** 2).mean())) < 0.004:
+        return ""
+    if not _lock.acquire(timeout=2.0):  # the GPU is busy with something else: wait a moment, then give up this round
+        _log("live words: GPU busy, skipped a round")
+        return ""
+    try:
+        t0 = time.time()
+        text = ears({"raw": x, "sampling_rate": SR_IN}, generate_kwargs={"language": "en", "task": "transcribe"})["text"].strip()
+    finally:
+        _lock.release()
+    _log(f"live words ({len(x) / SR_IN:.1f}s of speech, {time.time() - t0:.2f}s): {text!r}")
+    return "" if _is_phantom(text) else text
+
+
 _state = {"ears": None, "tts": None, "voice_key": None, "loading": False}
 _sessions: dict[str, "Session"] = {}
 _owner = {"token": None}  # only the newest chat window may talk
@@ -577,6 +602,8 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
             llm_history = sess.history + [{"role": "user", "content": _nudge_prompt(nudge)}]
         else:
             yield _ev(type="heard", text=text)
+            if sess.history and sess.history[-1]["role"] == "user":
+                sess.history.pop()  # an earlier turn was cancelled before it was answered; this one repeats it plus more
             sess.history.append({"role": "user", "content": text})
             llm_history = sess.history
         said, t0 = [], time.time()
