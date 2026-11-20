@@ -78,6 +78,18 @@ export function createVoiceChat(o) {
   let chunks = [];
   let preroll = [];
   let speechMs = 0;
+  // Speaking up on its own: if the room stays quiet it says something now and then, less and less often,
+  // and after the last attempt it gets bored and stays quiet until the person says something again.
+  const quietGaps = o.quietGapsSec || [35, 75, 130, 210]; // seconds of silence before each attempt (+-20%)
+  let nudges = 0;
+  let lastActive = performance.now();
+  let nudgeTimer = 0;
+  function maybeNudge() {
+    if (stopped || busy || muted || speaking || nudges >= quietGaps.length) return;
+    if (performance.now() - lastActive < quietGaps[nudges] * 1000 * (0.8 + Math.random() * 0.4)) return;
+    nudges += 1;
+    void runTurn({ nudge: nudges });
+  }
 
   async function post(body, onEvent) {
     const res = await fetch("/api/chat/turn", {
@@ -114,6 +126,7 @@ export function createVoiceChat(o) {
   }
 
   async function runTurn(body) {
+    if (!body.nudge) nudges = 0; // the person (or a scripted line) broke the silence
     busy = true;
     o.onStatus("Thinking…");
     let failed = "";
@@ -134,6 +147,7 @@ export function createVoiceChat(o) {
     if (failed) o.onStatus(`Problem: ${failed}`);
     resumeAt = performance.now() + 600; // let the room go quiet before listening again
     busy = false;
+    lastActive = performance.now();
     if (!failed && !stopped) o.onStatus(muted ? "Mic muted." : "Listening… just talk.");
   }
 
@@ -158,6 +172,8 @@ export function createVoiceChat(o) {
       loud = rms > threshold ? loud + 1 : 0;
       if (loud >= 2) {
         speaking = true;
+        nudges = 0;
+        lastActive = performance.now();
         chunks = [...preroll];
         speechMs = 0;
         quietMs = 0;
@@ -200,6 +216,7 @@ export function createVoiceChat(o) {
       node.connect(sink);
       sink.connect(ctx.destination);
       o.onStatus("Listening… just talk.");
+      nudgeTimer = setInterval(maybeNudge, 1000);
     },
     say: (text) => runTurn({ say: text }),
     sendText: (text) => runTurn({ text }),
@@ -212,6 +229,7 @@ export function createVoiceChat(o) {
     },
     stop() {
       stopped = true;
+      clearInterval(nudgeTimer);
       try {
         node?.disconnect();
         stream?.getTracks().forEach((t) => t.stop());

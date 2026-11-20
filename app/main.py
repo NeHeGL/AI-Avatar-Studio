@@ -380,6 +380,7 @@ class ChatTurnBody(BaseModel):
     text: str | None = None
     say: str | None = None
     token: str | None = None
+    nudge: int | None = None  # 1..4: the model speaks up because the room went quiet
 
 
 @app.get("/api/chat/brain")
@@ -398,7 +399,7 @@ def api_chat_start(body: ChatStartBody) -> dict:
 def api_chat_turn(body: ChatTurnBody) -> StreamingResponse:
     """NDJSON stream: heard -> say (one per sentence, with WAV audio) -> done."""
     return StreamingResponse(
-        chat.turn_stream(body.canonical_name, body.audio_base64, body.text, body.say, body.token),
+        chat.turn_stream(body.canonical_name, body.audio_base64, body.text, body.say, body.token, body.nudge),
         media_type="application/x-ndjson",
     )
 

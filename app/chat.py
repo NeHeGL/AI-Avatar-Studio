@@ -8,12 +8,14 @@ import base64
 import io
 import json
 import os
+import queue
 import re
 import sys
 import threading
 import time
 import uuid
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -128,11 +130,29 @@ SENT_END = re.compile(r"(?<=[.!?])\s+")
 _ABBREV = re.compile(r"\b(?:Dr|Mr|Mrs|Ms|Prof|St|Sr|Jr|vs|etc|No)\.$")
 
 
-def _sentences(tokens, min_chars=24):
+CLAUSE_END = re.compile(r"[,;:\u2014\u2013]\s")
+
+
+def _sentences(tokens, min_chars=24, first_clause_chars=18):
+    """Split a token stream into speakable chunks. The FIRST chunk may end at a natural pause (a comma, a dash)
+    as soon as it is long enough, so speech and video can start sooner; later chunks end at sentence ends."""
     buf = ""
+    first = True
     for tok in tokens:
         buf += tok
+        if first:
+            end = SENT_END.search(buf)
+            for m in CLAUSE_END.finditer(buf):
+                if m.end() >= first_clause_chars and not (end and end.start() < m.start()):
+                    piece = buf[: m.end()].strip()
+                    if not _ABBREV.search(piece):
+                        yield piece
+                        buf = buf[m.end():]
+                        first = False
+                    break
         parts = SENT_END.split(buf)
+        if len(parts) > 1 and len(parts[0].strip()) >= min_chars:
+            first = False
         while len(parts) > 1 and len(parts[0].strip()) >= min_chars and not _ABBREV.search(parts[0].strip()):
             yield parts[0].strip()
             buf = " ".join(parts[1:])
@@ -342,7 +362,15 @@ def _ev(**kw) -> bytes:
     return (json.dumps(kw) + "\n").encode()
 
 
-def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, say: str | None, token: str | None = None):
+_NUDGE_PROMPTS = {
+    1: "(You and the other person have been sitting quietly for a little while. Say ONE short, natural thing to fill the silence, like a friend in the room would: a casual remark or a light question. Under 15 words. Do not mention this note.)",
+    2: "(Still quiet. Say something short and idle, like thinking out loud or noticing something small. Under 12 words. Do not repeat yourself. Do not mention this note.)",
+    3: "(It has been quiet for a good while and you are starting to get bored. Mutter something short, maybe say you are bored. Under 12 words. Do not mention this note.)",
+    4: "(A very long silence. You are bored and giving up for now: say a short, trailing-off remark. Under 10 words. Do not mention this note.)",
+}
+
+
+def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, say: str | None, token: str | None = None, nudge: int | None = None):
     if token != _owner["token"]:
         yield _ev(type="superseded")
         return
@@ -361,6 +389,8 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
             )
             yield _ev(type="done")
             return
+        if nudge:
+            text, audio_b64 = None, None
         if audio_b64:
             import soundfile as sf
 
@@ -381,25 +411,53 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
                 yield _ev(type="ignored", reason="noise", text=text)
                 yield _ev(type="done")
                 return
-        if not text:
+        if not text and not nudge:
             yield _ev(type="done")
             return
-        yield _ev(type="heard", text=text)
-        sess.history.append({"role": "user", "content": text})
+        if nudge:
+            # a private note to the model; it is not shown as something the person said
+            llm_history = sess.history + [{"role": "user", "content": _NUDGE_PROMPTS.get(int(nudge), _NUDGE_PROMPTS[4])}]
+        else:
+            yield _ev(type="heard", text=text)
+            sess.history.append({"role": "user", "content": text})
+            llm_history = sess.history
         said, t0 = [], time.time()
-        for sent in _sentences(_ollama_stream(sess.system, sess.history)):
-            sent = _clean(sent)
-            if not sent:
-                continue
-            said.append(sent)
+        # Overlap the work: the language model keeps writing while earlier sentences get their voice and video.
+        jobs: "queue.Queue" = queue.Queue()
+
+        def render_sentence(sent: str):
+            t_a = time.time()
             wav = _speak(sess, sent)
-            yield _ev(
-                type="say",
-                text=sent,
-                audio=base64.b64encode(wav).decode(),
-                video_url=_talk_video_url(canonical_name, wav),
-            )
+            t_b = time.time()
+            vid = _talk_video_url(canonical_name, wav)
+            _log(f"timing: sentence ready at +{t_a - t0:.1f}s | voice {t_b - t_a:.1f}s | video {time.time() - t_b:.1f}s | {sent[:40]!r}")
+            return sent, wav, vid
+
+        def produce():
+            try:
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    for sent in _sentences(_ollama_stream(sess.system, llm_history)):
+                        sent = _clean(sent)
+                        if sent:
+                            jobs.put(pool.submit(render_sentence, sent))
+            except Exception as exc:
+                jobs.put(exc)
+            finally:
+                jobs.put(None)
+
+        threading.Thread(target=produce, daemon=True).start()
+        while True:
+            item = jobs.get()
+            if item is None:
+                break
+            if isinstance(item, Exception):
+                raise item
+            sent, wav, video_url = item.result()  # in order: sentence 2 never overtakes sentence 1
+            said.append(sent)
+            yield _ev(type="say", text=sent, audio=base64.b64encode(wav).decode(), video_url=video_url)
             _log(f"said {sent!r} (+{time.time() - t0:.1f}s)")
+        if nudge:
+            sess.history.append({"role": "user", "content": "(neither of you said anything for a while)"})
         sess.history.append({"role": "assistant", "content": " ".join(said)})
         yield _ev(type="done")
     except Exception as exc:  # surface to the page instead of a silent hang

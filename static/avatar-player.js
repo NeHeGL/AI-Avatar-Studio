@@ -1,5 +1,5 @@
 import { buildMeshFromScans, createMeshPuppet, meshFromLandmarks } from "/static/face-mesh-avatar.js?v=20";
-import { createVoiceChat } from "/static/voice-chat.js?v=2";
+import { createVoiceChat } from "/static/voice-chat.js?v=3";
 import { loadCinematic } from "/static/cinematic-clips.js?v=4";
 
 
@@ -286,8 +286,6 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
     if (destroyed) return;
     statusEl.textContent = t + chatBrainFoot;
     clearTimeout(thinkingTimer);
-    // The reply takes a few seconds: look thoughtful for a moment instead of freezing.
-    if (cinema && /^Thinking/.test(t)) thinkingTimer = setTimeout(() => void playCinematic("thinking"), 600);
   }
 
   async function startChat() {

@@ -36,6 +36,7 @@ from stream_pipeline_offline import StreamSDK
 CFG = "./checkpoints/ditto_cfg/v0.4_hubert_cfg_pytorch.pkl"
 DATA_ROOT = "./checkpoints/ditto_pytorch"
 MAX_SIZE = int(os.environ.get("DITTO_MAX_SIZE", "768"))  # longest side of the output picture
+STEPS = int(os.environ.get("DITTO_STEPS", "0"))  # diffusion steps per block; 0 = Ditto default (50, best lips)
 
 
 def _patch_gpu_resident():
@@ -92,7 +93,7 @@ async def render(request: Request, source: str, out: str):
     def work():
         with LOCK:
             t = time.time()
-            run(SDK, str(wav), source, str(out_path), {"setup_kwargs": {"max_size": MAX_SIZE}})
+            run(SDK, str(wav), source, str(out_path), {"setup_kwargs": {"max_size": MAX_SIZE, **({"sampling_timesteps": STEPS} if STEPS else {})}})
             return time.time() - t
 
     try:
