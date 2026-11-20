@@ -2,15 +2,28 @@
  * Pre-rendered full-quality clips ("cinematic" library) played over the live avatar.
  *
  * ml/cinematic_build.py renders each line (greeting, thinking, reactions, closing) with the best talking-video
- * model and writes data/media/<user>/cinematic/manifest.json. If that manifest exists, this module plays the
- * clips on top of the avatar; if it doesn't, everything silently falls back to the normal avatar.
+ * model and writes data/media/<user>/cinematic/manifest.json (+ the spoken line as src/<id>.wav).
+ * If that manifest exists, this module plays the clips on top of the avatar; if not, everything falls back
+ * silently to the normal avatar.
  *
- *   const cinema = await loadCinematic(stageEl, profile);   // null when there is no library
- *   await cinema?.play("greeting");                          // resolves when the clip has finished
- *   cinema?.playIfIdle("thinking");                          // fire-and-forget
- *   await cinema?.whenIdle();                                // wait for a running clip before speaking
+ * The picture plays MUTED (browsers always allow that) and the voice plays from the clip's own WAV through a
+ * normal audio element, the same way the chat's own voice is played, so it does not depend on the browser's
+ * video-codec or autoplay-with-sound rules. If sound is blocked, `onNote` says so.
+ *
+ *   const cinema = await loadCinematic(stageEl, profile, { onNote });   // null when there is no library
+ *   await cinema?.play("greeting");                                    // resolves when the clip has finished
+ *   cinema?.playIfIdle("thinking");                                    // fire-and-forget
+ *   await cinema?.whenIdle();                                          // wait for a running clip
  */
-export async function loadCinematic(stageEl, profile) {
+export async function loadCinematic(stageEl, profile, opts = {}) {
+  const note = (m) => {
+    try {
+      console.warn("[cinematic]", m);
+      opts.onNote?.(m);
+    } catch {
+      /* ignore */
+    }
+  };
   const frames = (profile.scan_frames?.length ? profile.scan_frames : profile.scan_previews) || [];
   const sample = profile.avatar_face_url || frames[0]?.url || "";
   const base = (sample.match(/^(.*\/media\/[^/]+)\//) || [])[1];
@@ -32,6 +45,7 @@ export async function loadCinematic(stageEl, profile) {
   figure.style.position = "relative";
   const video = document.createElement("video");
   video.playsInline = true;
+  video.muted = true; // picture only; the voice comes from the WAV below
   video.preload = "auto";
   video.style.cssText =
     "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;opacity:0;pointer-events:none;transition:opacity .18s ease;";
@@ -44,7 +58,8 @@ export async function loadCinematic(stageEl, profile) {
     const pool = clips.filter((c) => c.kind === kind);
     if (!pool.length) return null;
     const fresh = pool.filter((c) => c.id !== lastByKind[kind]);
-    const c = (fresh.length ? fresh : pool)[Math.floor(Math.random() * (fresh.length || pool.length))];
+    const list = fresh.length ? fresh : pool;
+    const c = list[Math.floor(Math.random() * list.length)];
     lastByKind[kind] = c.id;
     return c;
   }
@@ -55,12 +70,20 @@ export async function loadCinematic(stageEl, profile) {
     if (current) return current;
     current = new Promise((resolve) => {
       let finished = false;
+      let voice = null;
+      let tailTimer = 0;
       const finish = (ok) => {
         if (finished) return;
         finished = true;
-        video.removeEventListener("ended", onEnd);
-        video.removeEventListener("error", onErr);
+        clearTimeout(tailTimer);
+        video.removeEventListener("ended", onVideoEnd);
+        video.removeEventListener("error", onVideoErr);
         video.style.opacity = "0";
+        try {
+          voice?.pause();
+        } catch {
+          /* ignore */
+        }
         setTimeout(() => {
           try {
             video.pause();
@@ -71,19 +94,34 @@ export async function loadCinematic(stageEl, profile) {
         current = null;
         resolve(ok);
       };
-      const onEnd = () => finish(true);
-      const onErr = () => finish(false);
-      video.addEventListener("ended", onEnd);
-      video.addEventListener("error", onErr);
+      const onVideoEnd = () => finish(true);
+      const onVideoErr = () => {
+        note(`The "${clip.id}" clip could not be played by this browser.`);
+        finish(false);
+      };
+      video.addEventListener("ended", onVideoEnd);
+      video.addEventListener("error", onVideoErr);
       video.src = `${base}/cinematic/${clip.video}`;
       video.currentTime = 0;
-      video
-        .play()
-        .then(() => {
-          video.style.opacity = "1";
-        })
-        .catch(() => finish(false)); // e.g. the browser blocked sound before any click: fall back silently
-      setTimeout(() => finish(true), Math.max(4000, (clip.seconds || 3) * 1000 + 2500)); // never get stuck
+
+      voice = new Audio(`${base}/cinematic/src/${clip.id}.wav`);
+      voice.preload = "auto";
+      // end shortly after the words end: the rendered video is padded with a few seconds of silent idling
+      voice.addEventListener("ended", () => {
+        tailTimer = setTimeout(() => finish(true), 350);
+      });
+      voice.addEventListener("error", () => note(`The voice for "${clip.id}" could not be loaded.`));
+
+      const vp = video.play();
+      const ap = voice.play();
+      vp.then(() => {
+        video.style.opacity = "1";
+      }).catch((e) => {
+        note(`The "${clip.id}" picture could not start (${e?.name || e}).`);
+        finish(false);
+      });
+      ap.catch((e) => note(`Clip sound was blocked by the browser (${e?.name || e}) — click the page once and try again.`));
+      setTimeout(() => finish(true), Math.max(5000, (clip.seconds || 3) * 1000 + 3500)); // never get stuck
     });
     return current;
   }

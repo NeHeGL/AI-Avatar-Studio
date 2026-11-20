@@ -1,6 +1,6 @@
 import { buildMeshFromScans, createMeshPuppet, meshFromLandmarks } from "/static/face-mesh-avatar.js?v=20";
 import { createVoiceChat } from "/static/voice-chat.js?v=2";
-import { loadCinematic } from "/static/cinematic-clips.js?v=1";
+import { loadCinematic } from "/static/cinematic-clips.js?v=2";
 
 
 /**
@@ -315,7 +315,7 @@ function mountLiveAnimatedPlayer(stageEl, profile, hooks = {}) {
       });
       await chat.start();
       muteBtn.disabled = false;
-      cinema = await loadCinematic(stageEl, profile).catch(() => null);
+      cinema = await loadCinematic(stageEl, profile, { onNote: (m) => !destroyed && (statusEl.textContent = m) }).catch(() => null);
       if (!(cinema && (await playCinematic("greeting")))) await chat.say(`Hello, I'm ${j.display_name || name}.`);
     } catch (e) {
       console.error(e);
