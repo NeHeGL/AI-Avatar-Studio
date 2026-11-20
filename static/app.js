@@ -474,7 +474,7 @@ async function renderAvatar(result, afterUpdate = false) {
   const mode = result?.avatar_mode || (profile?.avatar_ready ? "live" : "placeholder");
   root.innerHTML = `<section class="card avatar-stage" id="avatar-stage"></section>`;
   const stage = document.getElementById("avatar-stage");
-  const { mountAvatarPlayer } = await import("/static/avatar-player.js?v=74");
+  const { mountAvatarPlayer } = await import("/static/avatar-player.js?v=75");
   avatarTeardown = mountAvatarPlayer(stage, profile || {}, {
     onBackProfile: () => {
       avatarTeardown?.();
