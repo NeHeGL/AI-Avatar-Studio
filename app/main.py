@@ -10,8 +10,8 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -62,6 +62,21 @@ def wait_until_serving(url: str, timeout_sec: float = 45.0) -> bool:
 
 
 app = FastAPI(title="Avatar Walkthrough")
+
+
+@app.middleware("http")
+async def _prefer_localhost(request: Request, call_next):
+    """Browsers that resist fingerprinting (Firefox with 'resistFingerprinting') exempt `localhost` but not `127.0.0.1`,
+    and there the face tracker fails with "index out of bounds". Send page loads from 127.0.0.1 to localhost.
+    Only browser page navigations are redirected; scripts calling the API on 127.0.0.1 are untouched."""
+    host = request.headers.get("host", "")
+    if (
+        host.startswith("127.0.0.1")
+        and request.method == "GET"
+        and "text/html" in request.headers.get("accept", "")
+    ):
+        return RedirectResponse(str(request.url).replace("127.0.0.1", "localhost", 1), status_code=307)
+    return await call_next(request)
 
 
 class NoCacheStatic(StaticFiles):
