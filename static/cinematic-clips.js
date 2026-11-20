@@ -180,7 +180,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     pickerEl.append(pick, file);
     figure.insertAdjacentElement("afterend", pickerEl);
   }
-  lookForMatte();
+  // lookForMatte(); // the background picker needs a cut-out of the person; replies are now used as FlashHead draws them
 
   // Find out first whether saved waiting animations exist, so the very first picture is already the right one
   // (no photo -> rest frame swap, no live face flashing in just to be hidden again).
@@ -192,11 +192,38 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     /* none yet */
   }
   const bankFromStart = earlyBank.length >= 6;
+  let bankInCropView = false; // the saved animations are FlashHead's own (already the head-and-shoulders view)
+  try {
+    bankInCropView = (await (await fetch(`${base}/cinematic/idle_bank/manifest.json`, { cache: "no-store" })).json()).space === "crop";
+  } catch {
+    /* no set yet */
+  }
+
+  // The talking videos are FlashHead's head-and-shoulders crop of the photo. The full-photo pictures (waiting animations) are zoomed
+  // to the same crop (talk_meta.json), and the still picture is FlashHead's own rest frame, so every clip starts and ends alike.
+  let cropMeta = null;
+  let hasRest = false;
+  try {
+    const r = await fetch(`${base}/cinematic/talk_meta.json`, { cache: "no-store" });
+    if (r.ok) cropMeta = await r.json();
+    hasRest = Boolean(cropMeta) && (await fetch(`${base}/cinematic/talk_rest.jpg`, { method: "HEAD", cache: "no-store" })).ok;
+  } catch {
+    /* no talking crop yet: the pictures stay as they were */
+  }
+  const crop = (el) => {
+    if (!cropMeta) return el;
+    const [x1, y1, x2] = cropMeta.box;
+    const [W, H] = cropMeta.size;
+    el.style.transformOrigin = "0 0";
+    el.style.transform = `scale(${W / (x2 - x1)}) translate(${(-x1 / W) * 100}%, ${(-y1 / H) * 100}%)`;
+    return el;
+  };
 
   // Base layer: the same prepared photo every clip and reply is made from, so size and framing always match.
   const baseStill = new Image();
   baseStill.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;z-index:0;pointer-events:none;";
-  baseStill.src = bankFromStart ? `${base}/cinematic/idle_bank/rest.jpg` : `${base}/cinematic/source.jpg`;
+  baseStill.src = hasRest ? `${base}/cinematic/talk_rest.jpg?v=${Math.round(cropMeta.stamp[0])}` : bankFromStart ? `${base}/cinematic/idle_bank/rest.jpg` : `${base}/cinematic/source.jpg`;
+  if (!hasRest) crop(baseStill);
   fg.appendChild(baseStill);
   const rawStill = stageEl.querySelector("#avatar-still");
   if (rawStill) rawStill.style.display = "none";
@@ -221,6 +248,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   bankVideo.muted = true;
   bankVideo.preload = "auto";
   bankVideo.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;opacity:0;pointer-events:none;z-index:1;";
+  if (!bankInCropView) crop(bankVideo);
   fg.appendChild(bankVideo);
   // The transparent twin of each animation: its cut-out is worked out per frame, so with a replaced background the outline
   // follows the head. It sits above the (statically masked) stack, which is hidden while it plays.
@@ -229,6 +257,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   alphaVideo.muted = true;
   alphaVideo.preload = "auto";
   alphaVideo.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;opacity:0;pointer-events:none;z-index:2;";
+  if (!bankInCropView) crop(alphaVideo);
   figure.appendChild(alphaVideo);
   const showAlpha = (on) => {
     alphaVideo.style.opacity = on ? "1" : "0";
@@ -398,7 +427,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
     if (bankOn() && !bankWasOn) {
       bankWasOn = true;
       lastBankEnd = lastProgress = Date.now(); // the proof-of-life clock starts now, not when the page opened (first runs wait a while)
-      baseStill.src = `${bankBase}/rest.jpg`; // the exact frame every animation starts and ends on
+      if (!hasRest) baseStill.src = `${bankBase}/rest.jpg`; // the exact frame every animation starts and ends on (FlashHead's own rest frame is already showing)
       setLive(false);
       tickBank();
     }
@@ -478,7 +507,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
           claims += 1;
           fetch(`${IDLE}/use?user=${encodeURIComponent(slug)}`, { method: "POST", mode: "no-cors" }).catch(() => {});
         }
-        idleOk = Boolean(j.ok && j.user === slug && (j.frames > 0 || (j.ready && j.live === false))); // paused is not the same as down
+        idleOk = false; // the live face is retired: waiting animations come from the saved set, replies from FlashHead
         if (idleOk) {
           if (Date.now() - lastFrameAt > 3000) img.src = `${IDLE}/frame.jpg?user=${encodeURIComponent(slug)}&n=${++frameNo}`; // frames stopped arriving: kick it
         }

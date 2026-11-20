@@ -5,12 +5,8 @@
     POST /render?source=<photo path>&out=<mp4 path>   body = WAV bytes   ->  {"ok": true, "path": "...", "seconds": 4.2}
     GET  /health
 
-Same interface the app already used for Ditto. How a reply is made:
-  1. the person is cut out of the source photo (cinematic/matte.png, cleaned, plus optional per-person fixes in matte_fix.json)
-     and put on a flat gray background, because a busy background confuses the model (shelf items turn up in the hair);
-  2. FlashHead renders the head-and-shoulders crop (512x512) speaking the audio;
-  3. the gray is keyed away again and the person is pasted back into the full photo, so the video has the same framing as the
-     photo and the page can treat it like any other clip.
+Same interface the app already used for Ditto. A reply is FlashHead's own 512x512 render of the head-and-shoulders crop of the
+person's photo (background included, nothing cut out or pasted), used as it is.
 """
 from __future__ import annotations
 
@@ -48,9 +44,9 @@ from flash_head.src.pipeline.flash_head_pipeline import FlashHeadPipeline  # noq
 
 CKPT = str(FH / "models" / "SoulX-FlashHead-1_3B")
 W2V = str(FH / "models" / "wav2vec2-base-960h")
-OUT_SIZE = int(os.environ.get("FLASHHEAD_OUT_SIZE", "768"))  # the finished video is this many pixels square
-GRAY_BGR = (128, 118, 110)  # the flat background the model sees
 SEED = 42
+TAIL_S = 0.6        # silence added after the speech, so the head settles before the clip ends
+EASE_FRAMES = 10    # the last 0.4 s blend onto the rest frame
 TMP = ROOT / "data" / "tmp_render"
 
 print("loading FlashHead-Lite...", flush=True)
@@ -64,98 +60,55 @@ _PREP: dict = {}
 
 
 # ---------------------------------------------------------------- preparing a person
-def _clean_matte(photo: np.ndarray, matte_png: Path, fix_json: Path) -> np.ndarray:
-    """0..1 person mask the size of the photo: the stored cut-out without small attachments (a poster behind the hair),
-    plus the polygons listed in matte_fix.json (things the cut-out wrongly kept: a chair arm, a sticker)."""
-    m = cv2.imread(str(matte_png), cv2.IMREAD_UNCHANGED)
-    m = m[..., 3] if m.ndim == 3 and m.shape[2] == 4 else (m if m.ndim == 2 else cv2.cvtColor(m, cv2.COLOR_BGR2GRAY))
-    m = cv2.resize(m, (photo.shape[1], photo.shape[0])).astype(np.float32) / 255.0
-    b = (m > 0.5).astype(np.uint8)
-    b = cv2.morphologyEx(b, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (45, 45)))
-    n, lab, st, _ = cv2.connectedComponentsWithStats(b)
-    if n > 1:
-        b = (lab == 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))).astype(np.uint8)
-    if fix_json.exists():
-        for poly in json.loads(fix_json.read_text(encoding="utf-8")).get("erase", []):
-            cv2.fillPoly(b, [np.array(poly, np.int32)], 0)
-    return b.astype(np.float32)
-
-
 def prepare(source: Path) -> dict:
-    """One-time preparation of a person's photo (cut-out, flat gray, FlashHead crop, empty-room plate). The results are saved next
-    to the photo (talk_crop.png, talk_plate.png, talk_meta.json) and only rebuilt when the photo, its cut-out or its fixes change."""
+    """One-time preparation of a person's photo: FlashHead's head-and-shoulders crop (a square 2x the face width, the face 55% of the
+    way down). Saved next to the photo (talk_crop.png, talk_meta.json) and only redone when the photo changes. The page uses the
+    crop box in talk_meta.json to zoom its idle pictures to the same view, so idle and talking line up."""
     d = source.parent
-    stamp = [source.stat().st_mtime, (d / "matte.png").stat().st_mtime, ((d / "matte_fix.json").stat().st_mtime if (d / "matte_fix.json").exists() else 0), OUT_SIZE, "plate-v4"]
+    stamp = [source.stat().st_mtime, "crop-v2-rest"]
     hit = _PREP.get(str(source))
     if hit and hit["stamp"] == stamp:
         return hit
     meta_f = d / "talk_meta.json"
     meta = json.loads(meta_f.read_text(encoding="utf-8")) if meta_f.exists() else {}
-    photo = cv2.imread(str(source))
-    H, W = photo.shape[:2]
-    person = _clean_matte(photo, d / "matte.png", d / "matte_fix.json")
-    if meta.get("stamp") != stamp or not (d / "talk_crop.png").exists() or not (d / "talk_plate.png").exists():
-        soft = cv2.GaussianBlur(cv2.dilate(person, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))), (0, 0), 2.5)[..., None]
-        flat = np.zeros_like(photo)
-        flat[:] = GRAY_BGR
-        rgb = cv2.cvtColor((photo * soft + flat * (1 - soft)).astype(np.uint8), cv2.COLOR_BGR2RGB)
+    if meta.get("stamp") != stamp or not (d / "talk_crop.png").exists() or not (d / "talk_rest.jpg").exists():
+        photo = cv2.imread(str(source))
+        H, W = photo.shape[:2]
+        rgb = cv2.cvtColor(photo, cv2.COLOR_BGR2RGB)
         boxes, _ = FACE(rgb)
         if len(boxes) == 0:
             raise RuntimeError("no face found in the photo")
         x1, y1, x2, y2 = boxes[0][0] * W, boxes[0][1] * H, boxes[0][2] * W, boxes[0][3] * H
-        cx, cy, side = (x1 + x2) / 2, (y1 + y2) / 2, (x2 - x1) * 2.0  # FlashHead's recipe: a square 2x the face, face 55% down
+        cx, cy, side = (x1 + x2) / 2, (y1 + y2) / 2, (x2 - x1) * 2.0
         box = [int(max(0, cx - side * 0.5)), int(max(0, cy - side * 0.55)), int(min(W, cx + side * 0.5)), int(min(H, cy + side * 0.45))]
-        bx1, by1, bx2, by2 = box
-        Image.fromarray(cv2.resize(rgb[by1:by2, bx1:bx2], (512, 512), interpolation=cv2.INTER_AREA)).save(d / "talk_crop.png")
-        Image.fromarray(rgb).save(d / "talk_flat.png")
-        # the room with the person painted out inside the crop: no ghost of the still photo shows around the moving head
-        plate = photo.copy()
-        region = photo[by1:by2, bx1:bx2]
-        pm = cv2.dilate((person[by1:by2, bx1:bx2] > 0.5).astype(np.uint8) * 255, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (31, 31)))
-        mg = int(0.12 * (by2 - by1))  # near the left, right and bottom edge the person carries on out of the crop (shoulders, shirt):
-        pm[:, :mg] = 0                # keep the real pixels there so the video blends into them without a seam
-        pm[:, -mg:] = 0
-        pm[-mg:, :] = 0
-        s3 = 3
-        small = cv2.inpaint(cv2.resize(region, (region.shape[1] // s3, region.shape[0] // s3)), cv2.resize(pm, (region.shape[1] // s3, region.shape[0] // s3)), 5, cv2.INPAINT_TELEA)
-        plate[by1:by2, bx1:bx2] = np.where(pm[..., None] > 0, cv2.resize(small, (region.shape[1], region.shape[0])), region)
-        cv2.imwrite(str(d / "talk_plate.png"), plate)
-        # the cleaned person mask for the page (it puts the chosen background behind everything that is not the person)
-        edge = cv2.GaussianBlur(cv2.erode(person, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))), (0, 0), 1.6)  # a hair inside the edge: no outline of the old room
-        cv2.imwrite(str(d / "talk_matte.png"), np.dstack([np.full_like(photo, 255), (edge * 255).astype(np.uint8)]))
-        meta = {"stamp": stamp, "box": box}
+        Image.fromarray(cv2.resize(rgb[box[1]:box[3], box[0]:box[2]], (512, 512), interpolation=cv2.INTER_AREA)).save(d / "talk_crop.png")
+        # the REST frame: how FlashHead itself draws the still photo (frame 0 of a render of silence). Every clip starts from it and
+        # lands back on it, and the page shows it as the still picture, so one clip follows the next without a visible join
+        silence = TMP / "fh_silence.wav"
+        TMP.mkdir(parents=True, exist_ok=True)
+        import soundfile as sf
+
+        sf.write(silence, np.zeros(16000, dtype=np.float32), 16000)
+        Image.fromarray(_frames_for(str(silence), d / "talk_crop.png")[0]).save(d / "talk_rest.jpg", quality=95)
+        meta = {"stamp": stamp, "box": box, "size": [W, H]}
         meta_f.write_text(json.dumps(meta), encoding="utf-8")
-        print(f"prepared {source.parent.parent.parent.name}: crop box {box}", flush=True)
-    plate = cv2.imread(str(d / "talk_plate.png"))
-    bx1, by1, bx2, by2 = meta["box"]
-    k = OUT_SIZE / W
-    box_o = (int(round(bx1 * k)), int(round(by1 * k)), int(round(bx2 * k)), int(round(by2 * k)))
-    bw, bh = box_o[2] - box_o[0], box_o[3] - box_o[1]
-    pm_crop = person[by1:by2, bx1:bx2]
-    inner = cv2.erode((pm_crop > 0.5).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (21, 21))).astype(np.float32)
-    outer = cv2.dilate((pm_crop > 0.5).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (61, 61))).astype(np.float32)
-    f = max(6, int(min(bw, bh) * 0.04))  # feather the paste window so the join with the still photo is invisible
-    win = np.ones((bh, bw), np.float32)
-    ramp = np.linspace(0, 1, f, dtype=np.float32)
-    win[:f, :] *= ramp[:, None]; win[-f:, :] *= ramp[::-1][:, None]; win[:, :f] *= ramp[None, :]; win[:, -f:] *= ramp[::-1][None, :]
-    hit = dict(
-        stamp=stamp, crop_png=d / "talk_crop.png", box_o=box_o, bw=bw, bh=bh,
-        base=cv2.resize(plate, (OUT_SIZE, OUT_SIZE), interpolation=cv2.INTER_AREA),
-        inner=cv2.resize(inner, (bw, bh)), outer=cv2.resize(outer, (bw, bh)), win=win,
-    )
+        print(f"prepared {d.parent.parent.name}: crop box {box} of {W}x{H}", flush=True)
+    hit = dict(stamp=stamp, crop_png=d / "talk_crop.png")
     _PREP[str(source)] = hit
     return hit
 
 
 # ---------------------------------------------------------------- rendering
-def _frames_for(wav_path: str, crop_png: Path) -> list[np.ndarray]:
+def _frames_for(wav_path: str, crop_png: Path, tail_s: float = 0.0, seed: int = SEED) -> list[np.ndarray]:
     """FlashHead's streaming loop for one utterance -> list of 512x512 RGB uint8 frames."""
-    get_base_data(PIPE, cond_image_path_or_dir=str(crop_png), base_seed=SEED, use_face_crop=False)
+    get_base_data(PIPE, cond_image_path_or_dir=str(crop_png), base_seed=seed, use_face_crop=False)
     p = get_infer_params()
     sr, fps, frame_num = p["sample_rate"], p["tgt_fps"], p["frame_num"]
     motion = p["motion_frames_num"]
     slice_len = frame_num - motion
     speech, _ = librosa.load(wav_path, sr=sr, mono=True)
+    if tail_s:
+        speech = np.concatenate([speech, np.zeros(int(tail_s * sr), dtype=speech.dtype)])  # a moment of silence: the face settles
     per_slice = slice_len * sr // fps
     rem = len(speech) % per_slice
     if rem:
@@ -173,23 +126,6 @@ def _frames_for(wav_path: str, crop_png: Path) -> list[np.ndarray]:
     return list(np.concatenate(out, axis=0))
 
 
-def _composite(frame_rgb: np.ndarray, prep: dict) -> np.ndarray:
-    """One FlashHead frame (person on gray) -> the full picture: the room, with the person pasted in."""
-    bw, bh = prep["bw"], prep["bh"]
-    f = cv2.resize(frame_rgb, (bw, bh), interpolation=cv2.INTER_AREA).astype(np.float32)
-    corners = np.concatenate([frame_rgb[:40, :40].reshape(-1, 3), frame_rgb[:40, -40:].reshape(-1, 3)])
-    bg = np.median(corners, axis=0)  # the gray as the model happened to render it in this frame
-    d = np.linalg.norm(f - bg, axis=2)
-    key = np.clip((d - 14.0) / 26.0, 0, 1)
-    alpha = np.maximum(key * prep["outer"], prep["inner"]) * prep["win"]  # key the gray away; the cut-out protects hair and shirt
-    x1, y1, x2, y2 = prep["box_o"]
-    out = prep["base"].copy()
-    region = out[y1:y2, x1:x2].astype(np.float32)
-    person_bgr = f[..., ::-1]
-    out[y1:y2, x1:x2] = (person_bgr * alpha[..., None] + region * (1 - alpha[..., None])).astype(np.uint8)
-    return out
-
-
 def render_reply(wav_bytes: bytes, source: Path, out_mp4: Path) -> float:
     TMP.mkdir(parents=True, exist_ok=True)
     stem = f"fh_{os.getpid()}_{int(time.time() * 1000)}"
@@ -199,27 +135,122 @@ def render_reply(wav_bytes: bytes, source: Path, out_mp4: Path) -> float:
     t0 = time.time()
     try:
         prep = prepare(source)
-        frames = _frames_for(str(wav), prep["crop_png"])
+        frames = _frames_for(str(wav), prep["crop_png"], tail_s=TAIL_S)
+        rest = np.array(Image.open(prep["crop_png"].parent / "talk_rest.jpg").convert("RGB")).astype(np.float32)
+        n = min(EASE_FRAMES, len(frames))
+        for i in range(n):  # ease the last frames onto the rest frame so the clip ends exactly on it
+            w = (i + 1) / n
+            w = w * w * (3 - 2 * w)
+            frames[len(frames) - n + i] = ((1 - w) * frames[len(frames) - n + i].astype(np.float32) + w * rest).astype(np.uint8)
         proc = subprocess.Popen(
-            ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{OUT_SIZE}x{OUT_SIZE}", "-r", "25", "-i", "-",
-             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "18", "-bf", "0", str(silent)],
+            ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "512x512", "-r", "25", "-i", "-",
+             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "17", "-bf", "0", str(silent)],
             stdin=subprocess.PIPE,
         )
         for fr in frames:
-            proc.stdin.write(np.ascontiguousarray(_composite(fr, prep)).tobytes())
+            proc.stdin.write(np.ascontiguousarray(fr).tobytes())
         proc.stdin.close()
         proc.wait()
         out_mp4.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(silent), "-i", str(wav), "-c:v", "copy", "-c:a", "aac", "-shortest", str(out_mp4)], check=True)
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(silent), "-i", str(wav), "-c:v", "copy", "-af", f"apad=pad_dur={TAIL_S + 0.2}", "-c:a", "aac", "-shortest", str(out_mp4)], check=True)
     finally:
         for p in (wav, silent):
             p.unlink(missing_ok=True)
     return time.time() - t0
 
 
+# ---------------------------------------------------------------- the waiting animations (idle bank)
+BANK_COUNT = int(os.environ.get("FLASHHEAD_BANK_COUNT", "14"))
+BANK_SECONDS = float(os.environ.get("FLASHHEAD_BANK_SECONDS", "6"))
+_bank = {"running": False, "done": 0, "total": 0}
+
+
+def _ease(frames, rest, n_in=8, n_out=10):
+    """Start exactly on the rest frame and land exactly back on it, so any clip can follow any other without a visible join."""
+    sm = lambda t: t * t * (3 - 2 * t)  # noqa: E731
+    out = [f.astype(np.float32) for f in frames]
+    for j in range(min(n_in, len(out))):
+        w = sm((j + 1) / n_in)
+        out[j] = (1 - w) * rest + w * out[j]
+    for j in range(min(n_out, len(out))):
+        w = sm((j + 1) / n_out)
+        k = len(out) - n_out + j
+        out[k] = (1 - w) * out[k] + w * rest
+    return [np.clip(f, 0, 255).astype(np.uint8) for f in out]
+
+
+def build_bank(source: Path, count: int = BANK_COUNT, seconds: float = BANK_SECONDS) -> None:
+    """Fresh set of waiting animations: FlashHead given near-silence, a different seed each time (blinks, small head moves, breathing)."""
+    if _bank["running"]:
+        return
+    import soundfile as sf
+
+    _bank.update(running=True, done=0, total=count)
+    try:
+        with LOCK:
+            prep = prepare(source)
+        d = source.parent / "idle_bank"
+        d.mkdir(exist_ok=True)
+        for old in list(d.glob("*.mp4")) + list(d.glob("*.webm")) + [d / "manifest.json"]:
+            old.unlink(missing_ok=True)  # a fresh set: this folder holds only what this function makes
+        rest_img = Image.open(source.parent / "talk_rest.jpg").convert("RGB")
+        rest_img.save(d / "rest.jpg", quality=95)
+        rest = np.array(rest_img).astype(np.float32)
+        TMP.mkdir(parents=True, exist_ok=True)
+        clips = []
+        for i in range(count):
+            wav = TMP / f"fh_idle_{i}.wav"
+            rng = np.random.default_rng(1000 + i)
+            sf.write(wav, (rng.standard_normal(int(seconds * 16000)) * 0.0008).astype(np.float32), 16000)
+            with LOCK:
+                frames = _frames_for(str(wav), prep["crop_png"], seed=1000 + i)
+            wav.unlink(missing_ok=True)
+            frames = _ease(frames, rest)
+            name = f"calm_{i:03d}"
+            proc = subprocess.Popen(
+                ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "512x512", "-r", "25", "-i", "-",
+                 "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "17", "-bf", "0", str(d / f"{name}.mp4")],
+                stdin=subprocess.PIPE,
+            )
+            for fr in frames:
+                proc.stdin.write(np.ascontiguousarray(fr).tobytes())
+            proc.stdin.close()
+            proc.wait()
+            clips.append({"id": name, "kind": "breathe", "file": f"{name}.mp4", "dur": round(len(frames) / 25, 2), "webm": None, "think": False})
+            (d / "manifest.json").write_text(
+                json.dumps({"rest": "rest.jpg", "space": "crop", "width": 512, "height": 512, "fps": 25, "clips": clips}, indent=1), encoding="utf-8")
+            _bank["done"] = i + 1
+            print(f"idle bank: {name} ({i + 1}/{count})", flush=True)
+    finally:
+        _bank["running"] = False
+
+
+def _bank_ready(source: Path) -> bool:
+    try:
+        j = json.loads((source.parent / "idle_bank" / "manifest.json").read_text(encoding="utf-8"))
+        return j.get("space") == "crop" and len(j.get("clips", [])) >= 6
+    except Exception:
+        return False
+
+
+@app.post("/idle_bank")
+def idle_bank(source: str, count: int = BANK_COUNT, force: int = 0):
+    """Build the waiting animations in the background (a no-op if a good set exists, unless force=1)."""
+    src = Path(source)
+    if _bank["running"] or (_bank_ready(src) and not force):
+        return {"ok": True, "started": False, **_bank}
+    threading.Thread(target=build_bank, args=(src, count), daemon=True).start()
+    return {"ok": True, "started": True, **_bank}
+
+
+@app.get("/idle_bank_status")
+def idle_bank_status():
+    return _bank
+
+
 @app.get("/health")
 def health():
-    return {"ok": True, "engine": "flashhead-lite-4", "out_size": OUT_SIZE}
+    return {"ok": True, "engine": "flashhead-lite-4", "out_size": 512}
 
 
 @app.post("/prepare")
@@ -228,6 +259,8 @@ def prepare_person(source: str):
     try:
         with LOCK:
             prepare(Path(source))
+        if not _bank_ready(Path(source)) and not _bank["running"]:  # the first time a person is seen: make their waiting animations too
+            threading.Thread(target=build_bank, args=(Path(source),), daemon=True).start()
         return {"ok": True}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:300]}, status_code=500)

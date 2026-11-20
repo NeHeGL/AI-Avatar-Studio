@@ -26,7 +26,6 @@ if str(ROOT) not in sys.path:
 
 LOGS = ROOT / "data" / "tmp_render"
 CHILDREN = [
-    ("live face", ROOT / "ml" / "realtime" / "lpenv" / "Scripts" / "python.exe", ROOT / "ml" / "realtime" / "idle_server.py", "idle.out.log"),
     ("video renderer", ROOT / "ml" / "realtime" / "flashhead" / ".venv" / "Scripts" / "python.exe", ROOT / "ml" / "realtime" / "flashhead_render_server.py", "flashhead.out.log"),
 ]
 

@@ -311,6 +311,8 @@ def _build_system(display_name: str, notes: str) -> str:
     spoken = (
         "You are in a spoken conversation: one to three short, natural sentences. "
         "No lists, no markdown, no emojis, no stage directions, no parenthetical notes. "
+        "Always write names with their normal spelling. NEVER write a pronunciation guide, split a name into syllables, or spell a name out: "
+        "the voice already says names correctly. "
         "Begin EVERY sentence with one mood tag in square brackets that matches how you feel saying it, chosen from: "
         "[happy] [amused] [surprised] [interested] [puzzled] [concerned] [thoughtful] [playful] [neutral]. "
         "Example: [amused] Ha, that's a good one. [interested] What made you think of it? "
@@ -349,11 +351,51 @@ def _build_system(display_name: str, notes: str) -> str:
     return nl.join(parts)
 
 
+def _pronunciations(display_name: str, notes: str) -> tuple[dict[str, str], list[tuple["re.Pattern", str]]]:
+    """Names the voice would get wrong, from the person's notes ("last name is pronounced: mall o fee", "sean molofee (pronounced shawn)").
+    Returns (name -> a spelling the voice reads smoothly, patterns that turn a sounded-out spelling the model might write back into the name)."""
+    pron: dict[str, str] = {}
+    back: list[tuple[re.Pattern, str]] = []
+    last = display_name.split()[-1] if display_name.split() else ""
+    for line in notes.splitlines():
+        m = re.search(r"last name is pronounced:?\s*(.+)$", line, re.I)
+        if m and last:
+            words = re.findall(r"[A-Za-z']+", m.group(1))
+            if words:
+                pron[last] = "".join(words).capitalize()  # "mall o fee" -> "Mallofee": one word, said smoothly
+                if len(words) > 1:
+                    back.append((re.compile(r"[\s\-\.]*".join(re.escape(w) for w in words), re.I), last))
+            continue
+        m = re.match(r"\s*(?:[A-Za-z' ]+:\s*)?([A-Za-z']+)\s+[A-Za-z']+\s*\(pronounced\s+([^)]+)\)", line, re.I)  # "brother: sean molofee (pronounced shawn)"
+        if m:
+            pron[m.group(1)] = m.group(2).strip()
+            continue
+        m = re.match(r"\s*([A-Za-z' ]+?)\s+(?:is|are)\s+pronounced:?\s*(.+)$", line, re.I)
+        if m:
+            pron[m.group(1).strip()] = "".join(re.findall(r"[A-Za-z']+", m.group(2))).capitalize()
+    return pron, back
+
+
+def _fix_names(sess: "Session", text: str) -> str:
+    """What the model wrote, with any sounded-out spelling of a name turned back into the name."""
+    for pat, name in sess.back:
+        text = pat.sub(name, text)
+    return text
+
+
+def _for_voice(sess: "Session", text: str) -> str:
+    """The text as the voice should read it: names respelled the way they are said."""
+    for name, say in sess.pron.items():
+        text = re.sub(rf"\b{re.escape(name)}\b", say, text, flags=re.I)
+    return text
+
+
 class Session:
     def __init__(self, canonical_name: str, display_name: str, notes: str):
         self.name = display_name
         self.history: list[dict] = []
         self.system = _build_system(display_name, notes)
+        self.pron, self.back = _pronunciations(display_name, notes)
 
 
 def _voice_reference(canonical_name: str) -> tuple[str, Path | None, str, str]:
@@ -418,7 +460,7 @@ def _speak(sess: Session, text: str) -> bytes:
         best = None
         ref_emb = None
         for attempt in range(max(1, VOICE_GUARD_TRIES)):
-            x = tts.generate(text, cfg_weight=0.5, exaggeration=0.5).squeeze().cpu().numpy()
+            x = tts.generate(_for_voice(sess, text), cfg_weight=0.5, exaggeration=0.5).squeeze().cpu().numpy()
             if VOICE_GUARD_TRIES <= 1:
                 best = (1.0, x)
                 break
@@ -516,8 +558,43 @@ _NUDGE_VARIANTS = {
 }
 
 
+GREETING_NUDGE = 9  # not a "quiet" nudge: the person has just opened the chat
+
+
+def _greeting_prompt() -> str:
+    import datetime
+
+    now = datetime.datetime.now()
+    part = "morning" if now.hour < 12 else "afternoon" if now.hour < 18 else "evening"
+    when = f"It is {now.strftime('%A')} {part}, {now.strftime('%B')} {now.day}."
+    return (
+        f"(The person has just opened the chat to talk with you. {when} Open the conversation however YOU feel like today, the way a real "
+        "person would: a hello, a thought you had, a question, something about the day or the time, a bit of humour. Do not use the same "
+        "opening you would use every day, and do not announce that you are an AI. One or two short sentences. Do not mention this note.)"
+    )
+
+
+FREE_THOUGHTS = [
+    "(It has been quiet, and you have been thinking. Say out loud what actually occurred to you: something from what you two talked about, a "
+    "memory, a small wonder about the world, an observation about the day or the hour. Not a generic check-in. One or two short sentences. "
+    "Do not mention this note.)",
+    "(It has been quiet. A thought drifted in while you waited. Share it the way a person does, half out loud: musing, curious, a little "
+    "random is fine. You may end with a question or just leave it hanging. One or two short sentences. Do not mention this note.)",
+    "(It has been quiet. Something you said earlier, or something they said, has been on your mind. Come back to it naturally, or move to "
+    "whatever your mind has wandered to. Keep it short and real. Do not mention this note.)",
+]
+
+
 def _nudge_prompt(n: int) -> str:
+    import datetime
     import random
+
+    if int(n) == GREETING_NUDGE:
+        return _greeting_prompt()
+    if int(n) <= 3 and random.random() < 0.7:  # mostly a free thought; the older styled prompts (boredom, games...) fill in the rest
+        now = datetime.datetime.now()
+        part = "morning" if now.hour < 12 else "afternoon" if now.hour < 18 else "evening"
+        return random.choice(FREE_THOUGHTS).replace("(", f"({now.strftime('%A')} {part}. ", 1)
 
     return random.choice(_NUDGE_VARIANTS.get(min(max(int(n), 1), 7), _NUDGE_VARIANTS[7]))
 
@@ -599,7 +676,7 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
                     mood = "neutral"
                     for sent in _sentences(_ollama_stream(sess.system, llm_history)):
                         sent, mood = _split_mood(sent, mood)
-                        sent = _clean(sent)
+                        sent = _fix_names(sess, _clean(sent))
                         if sent:
                             jobs.put(pool.submit(render_sentence, sent, mood))
             except Exception as exc:
@@ -621,7 +698,7 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
             yield _ev(type="say", text=sent, mood=mood, audio=base64.b64encode(wav).decode(), video_url=video_url)
             _log(f"said {sent!r} (+{time.time() - t0:.1f}s)")
         if nudge:
-            sess.history.append({"role": "user", "content": "(neither of you said anything for a while)"})
+            sess.history.append({"role": "user", "content": "(the person has just opened the chat)" if nudge == GREETING_NUDGE else "(neither of you said anything for a while)"})
         sess.history.append({"role": "assistant", "content": " ".join(said)})  # tagged
         yield _ev(type="done")
     except Exception as exc:  # surface to the page instead of a silent hang

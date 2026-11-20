@@ -360,6 +360,8 @@ export function createVoiceChat(o) {
       nudgeTimer = setInterval(maybeNudge, 1000);
     },
     say: (text) => runTurn({ say: text }),
+    /** Open the conversation: the model writes a proper hello for this person and this moment. */
+    greet: () => runTurn({ nudge: 9 }),
     /** Restart the silence clock (after the greeting, say). */
     touch() {
       lastActive = performance.now();
