@@ -34,7 +34,7 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
     <audio id="avatar-audio" preload="auto"></audio>
     <div class="avatar-actions btn-row" style="justify-content: center; flex-wrap: wrap; gap: 0.5rem;">
       <button type="button" class="btn-primary" id="chat-mute" disabled>Mute mic</button>
-      <button type="button" class="btn-ghost" id="back-profile">Back to profile</button>
+      <button type="button" class="btn-ghost" id="back-profile">Back to profile settings</button>
     </div>
   `;
 
