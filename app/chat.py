@@ -438,8 +438,8 @@ def _speak(sess: Session, text: str) -> bytes:
     return _wav_bytes(_level_to(best[1], tts.sr), tts.sr)
 
 
-def _ditto_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> str:
-    """Photoreal talking video of this sentence from the local Ditto render service; "" on any problem (the page then
+def _reply_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> str:
+    """Photoreal talking video of this sentence from the local FlashHead render service; "" on any problem (the page then
     falls back to the animated face). Uses the same wide photo as the pre-rendered clips so the framing never jumps."""
     try:
         import urllib.parse
@@ -451,9 +451,6 @@ def _ditto_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> s
 
         user_dir = MEDIA_DIR / _user_media_dir(canonical_name)
         source = user_dir / "cinematic" / "source.jpg"
-        rest = user_dir / "cinematic" / "idle_bank" / "rest.jpg"
-        if rest.exists():  # the animations all start and end on this frame: talking starts on it too, so the cut is invisible
-            source = rest
         if not source.exists():
             return ""
         talk_dir = user_dir / "talk"
@@ -466,7 +463,7 @@ def _ditto_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> s
             glasses = bool(json.loads((user_dir / "cinematic" / "options.json").read_text(encoding="utf-8")).get("glasses"))
         except Exception:
             glasses = False
-        url = os.environ.get("AVATAR_DITTO_URL", "http://127.0.0.1:8771") + "/render?" + urllib.parse.urlencode(
+        url = os.environ.get("AVATAR_VIDEO_URL", "http://127.0.0.1:8771") + "/render?" + urllib.parse.urlencode(
             {"source": str(source), "out": str(out), **({"emotion": mood} if mood and mood != "neutral" else {}), **({"calm_eyes": 1} if glasses else {})}
         )
         t0 = time.time()
@@ -483,10 +480,10 @@ def _ditto_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> s
 
 
 def _talk_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> str:
-    """Video for this sentence from the local Ditto render service; "" if turned off (AVATAR_REPLY_VIDEO=off) or on any problem."""
+    """Video for this sentence from the local FlashHead render service; "" if turned off (AVATAR_REPLY_VIDEO=off) or on any problem."""
     if os.environ.get("AVATAR_REPLY_VIDEO", "ditto").strip().lower() in ("off", "0", "no", "none"):
         return ""
-    return _ditto_video_url(canonical_name, wav_bytes, mood)
+    return _reply_video_url(canonical_name, wav_bytes, mood)
 
 
 def _ev(**kw) -> bytes:
