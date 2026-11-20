@@ -427,6 +427,7 @@ def start(canonical_name: str) -> dict:
     _sessions[canonical_name] = Session(canonical_name, display, notes)
     _sessions[canonical_name].ref_wav = ref_wav  # type: ignore[attr-defined]
     _sessions[canonical_name].key = key  # type: ignore[attr-defined]
+    _sessions[canonical_name].voice_profile = _voice_profile(canonical_name)  # type: ignore[attr-defined]
     token = uuid.uuid4().hex
     _owner["token"] = token  # any older window is now superseded
     _log(f"chat brain: {LLM_MODEL} mode={LLM_MODE}")
@@ -454,29 +455,89 @@ def _voice_similarity(tts, samples: np.ndarray, ref_emb: np.ndarray) -> float:
     return float(np.dot(e, r))
 
 
+def _voice_profile(canonical_name: str) -> dict:
+    """Optional per-person voice settings (data/media/<person>/voice/profile.json): {"cfg_weight", "exaggeration", "temperature",
+    "flow": true (no commas after short phrases, so they run together), "max_tries", "pitch_hz": [low, high] (the pitch a take must sit in)}."""
+    try:
+        from app.capture import _user_media_dir
+        from app.storage import MEDIA_DIR
+
+        f = MEDIA_DIR / _user_media_dir(canonical_name) / "voice" / "profile.json"
+        if f.exists():
+            return json.loads(f.read_text(encoding="utf-8"))
+    except Exception as exc:
+        _log("voice profile not read:", exc)
+    return {}
+
+
+def _flow(text: str) -> str:
+    """For people who run short phrases together ("Yeah, Gary, Sam here."): drop a comma that follows a phrase of 4 words or fewer.
+    The cloner treats every comma as a pause, which breaks such phrases into pieces."""
+    out = []
+    for sent in re.split(r"(?<=[.!?])\s+", text):
+        parts = sent.split(",")
+        buf, clause = parts[0], len(parts[0].split())
+        for nxt in parts[1:]:
+            if clause <= 4:  # a short phrase: run it into the next one
+                buf += " " + nxt.lstrip()
+                clause += len(nxt.split())
+            else:
+                buf += "," + nxt
+                clause = len(nxt.split())
+        out.append(re.sub(r"\s+", " ", buf).strip())
+    return " ".join(out)
+
+
+def _median_pitch(x: np.ndarray, sr: int) -> float | None:
+    try:
+        import parselmouth
+
+        snd = parselmouth.Sound(x.astype(np.float64), sampling_frequency=sr)
+        f = snd.to_pitch_ac(time_step=0.02, pitch_floor=60, pitch_ceiling=300).selected_array["frequency"]
+        f = f[f > 0]
+        return float(np.median(f)) if len(f) > 5 else None
+    except Exception:
+        return None
+
+
 def _speak(sess: Session, text: str) -> bytes:
     tts = _state["tts"]
+    prof = getattr(sess, "voice_profile", None) or {}
+    spoken = _for_voice(sess, text)
+    if prof.get("flow"):
+        spoken = _flow(spoken)
+    cfg, exg, temp = prof.get("cfg_weight", 0.5), prof.get("exaggeration", 0.5), prof.get("temperature", 0.8)
+    tries = max(1, VOICE_GUARD_TRIES, int(prof.get("max_tries", 0)))
+    n_words = max(1, len(spoken.split()))
+    lo_s, hi_s = n_words * 0.12, n_words * 0.9 + 2.0  # a take far outside this is a ramble (dead air) or a cut-off
+    window = prof.get("pitch_hz")
     with _lock:
         _use_voice(sess.key, sess.ref_wav)  # type: ignore[attr-defined]
-        best = None
+        best = None  # (score, samples)
         ref_emb = None
-        for attempt in range(max(1, VOICE_GUARD_TRIES)):
-            x = tts.generate(_for_voice(sess, text), cfg_weight=0.5, exaggeration=0.5).squeeze().cpu().numpy()
-            if VOICE_GUARD_TRIES <= 1:
-                best = (1.0, x)
-                break
+        for attempt in range(tries):
+            x = tts.generate(spoken, cfg_weight=cfg, exaggeration=exg, temperature=temp).squeeze().cpu().numpy()
+            dur = len(x) / tts.sr
+            ok = lo_s <= dur <= hi_s
+            if ok and window:
+                mp = _median_pitch(x, tts.sr)
+                if mp is not None and not (window[0] <= mp <= window[1]):
+                    ok = False
+                    _log(f"voice take rejected: pitch {mp:.0f} Hz outside {window[0]}-{window[1]} (try {attempt + 1})")
+            elif not ok:
+                _log(f"voice take rejected: {dur:.1f}s for {n_words} words (try {attempt + 1})")
+            sim = 0.5
             try:
                 if ref_emb is None:
                     ref_emb = tts.conds.t3.speaker_emb.detach().float().cpu().numpy().reshape(-1)
                 sim = _voice_similarity(tts, x, ref_emb)
             except Exception as exc:  # the guard must never stop the voice
                 _log("voice guard skipped:", exc)
-                best = (1.0, x)
-                break
             _log(f"voice match {sim:.2f} (try {attempt + 1}) {text[:30]!r}")
-            if best is None or sim > best[0]:
-                best = (sim, x)
-            if sim >= VOICE_GUARD_OK:
+            score = sim + (1.0 if ok else 0.0)  # a take that passes the checks always beats one that does not
+            if best is None or score > best[0]:
+                best = (score, x)
+            if ok and (VOICE_GUARD_TRIES <= 1 or sim >= VOICE_GUARD_OK):
                 break
     return _wav_bytes(_level_to(best[1], tts.sr), tts.sr)
 
