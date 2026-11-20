@@ -1,6 +1,4 @@
 ml/.venv/
-ml/realtime/lpenv/
-ml/realtime/LivePortrait/
 ml/realtime/ffmpeg/
 __pycache__/
 *.pyc

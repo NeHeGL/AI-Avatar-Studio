@@ -17,10 +17,6 @@ __pycache__/
 *.bin
 
 # Third-party code and generated/duplicate folders: they are not this project's own code.
-ml/realtime/ditto/
-ml/realtime/LivePortrait/
-ml/realtime/lpenv/
-ml/realtime/dittoenv/
 ml/realtime/ffmpeg/
 static/vendor/
 backups_2026-11-17/
