@@ -69,13 +69,22 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   const sourceUrl = `${base}/cinematic/source.jpg`;
   const BG_KEY = `avatar-bg-${base.split("/").pop()}`;
   let matteReady = false;
+  const bokeh = (colors) =>
+    colors
+      .map(([x, y, r, c]) => `radial-gradient(circle at ${x}% ${y}%, ${c} 0, ${c} ${(r * 0.25).toFixed(1)}%, transparent ${(r * 0.8).toFixed(1)}%)`)
+      .join(",");
   const BACKGROUNDS = {
     original: { label: "Original" },
-    blur: { label: "Blurred", css: `url(${sourceUrl})`, filter: "blur(18px) brightness(.85)" },
-    studio: { label: "Studio", css: "radial-gradient(ellipse at 50% 35%, #3b4252 0%, #1b1f2a 70%)" },
-    sky: { label: "Sky", css: "linear-gradient(180deg, #9fd0ff 0%, #e8f3ff 100%)" },
-    warm: { label: "Warm", css: "linear-gradient(160deg, #f6d5a8 0%, #c98b5e 100%)" },
-    green: { label: "Green", css: "#1f6f4a" },
+    studio: { label: "Studio", css: "radial-gradient(ellipse at 50% 30%, #3b4252 0%, #232838 45%, #11141c 100%)" },
+    blur: { label: "Blurred room", css: `url(${sourceUrl})`, filter: "blur(7px) brightness(.9) saturate(1.1)" },
+    night: {
+      label: "City night",
+      css: `${bokeh([[18, 30, 7, "rgba(255,190,90,.55)"], [78, 22, 9, "rgba(120,180,255,.5)"], [60, 62, 6, "rgba(255,120,150,.45)"], [30, 70, 8, "rgba(140,255,200,.35)"], [88, 70, 5, "rgba(255,230,150,.5)"], [8, 78, 5, "rgba(200,140,255,.4)"]])},linear-gradient(180deg,#0b1026 0%,#1a1f45 60%,#2b2350 100%)`,
+    },
+    sunset: { label: "Sunset", css: "radial-gradient(circle at 50% 78%, #ffd27a 0%, #ff8a5c 28%, #c4457a 55%, #3a2a6b 100%)" },
+    sky: { label: "Sky", css: `${bokeh([[22, 24, 14, "rgba(255,255,255,.7)"], [70, 18, 10, "rgba(255,255,255,.6)"], [80, 40, 16, "rgba(255,255,255,.45)"]])},linear-gradient(180deg,#5aa9f0 0%,#a8d4ff 55%,#e9f4ff 100%)` },
+    forest: { label: "Forest", css: `${bokeh([[20, 25, 9, "rgba(190,255,160,.35)"], [65, 15, 12, "rgba(220,255,180,.3)"], [85, 55, 8, "rgba(160,255,190,.3)"], [35, 60, 11, "rgba(210,255,150,.25)"]])},linear-gradient(170deg,#2f6b45 0%,#1b4a33 60%,#0f2e22 100%)` },
+    warm: { label: "Warm office", css: `${bokeh([[15, 35, 8, "rgba(255,225,160,.5)"], [80, 30, 11, "rgba(255,210,140,.4)"], [55, 70, 7, "rgba(255,240,200,.35)"]])},linear-gradient(160deg,#e3b58a 0%,#a8714b 60%,#6b3f27 100%)` },
   };
   function applyBackground(key) {
     let choice = BACKGROUNDS[key];
@@ -102,9 +111,9 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
       /* ignore */
     }
   }
-  let bgKey = "original";
+  let bgKey = "studio"; // the default look
   try {
-    bgKey = localStorage.getItem(BG_KEY) || "original";
+    bgKey = localStorage.getItem(BG_KEY) || "studio";
   } catch {
     /* ignore */
   }

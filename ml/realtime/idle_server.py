@@ -45,6 +45,7 @@ class Avatar:
 
     def __init__(self, photo: Path, pipe: LivePortraitPipeline):
         self.pipe = pipe
+        self.lock = threading.RLock()
         self.w = pipe.live_portrait_wrapper
         crop = CropConfig()
         bgr = cv2.imread(str(photo))
@@ -73,6 +74,30 @@ class Avatar:
         self.c_s_l = torch.from_numpy(calc_lip_close_ratio(self.src_lmk[None])).float().to(dev)
         self.lip_rest_delta = self.w.retarget_lip(self.x_s, torch.cat([self.c_s_l, self.c_s_l], dim=1))
 
+    def library(self, clip_dir: Path, step: float = 0.25) -> dict:
+        """Facial expressions taken from this person's own clips: how each sampled frame's face differs from their neutral photo.
+        Keys look like 'reaction_laugh@1.25'. Only the expression is kept (no head pose), so it can be mixed into any movement."""
+        lib = {}
+        for mp4 in sorted(clip_dir.glob("*.mp4")):
+            cap = cv2.VideoCapture(str(mp4))
+            fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+            n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            t = 0.0
+            while int(t * fps) < n:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, int(t * fps))
+                ok, bgr = cap.read()
+                if not ok:
+                    break
+                try:
+                    m = self.motion_of(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+                    if m is not None:
+                        lib[f"{mp4.stem}@{t:.2f}"] = m["exp"]
+                except Exception:
+                    pass
+                t += step
+            cap.release()
+        return lib
+
     @torch.no_grad()
     def motion_of(self, rgb: np.ndarray):
         """How this frame differs from the neutral photo (pose + expression), or None if no face is found."""
@@ -85,7 +110,12 @@ class Avatar:
                 "roll": k["roll"] - s["roll"], "t": k["t"] - s["t"]}
 
     @torch.no_grad()
-    def render(self, yaw=0.0, pitch=0.0, roll=0.0, dx=0.0, dy=0.0, blink=0.0, mouth=0.0, seed=None, w=0.0) -> np.ndarray:
+    def render(self, *a, **k) -> np.ndarray:
+        with self.lock:
+            return self._render(*a, **k)
+
+    @torch.no_grad()
+    def _render(self, yaw=0.0, pitch=0.0, roll=0.0, dx=0.0, dy=0.0, blink=0.0, mouth=0.0, seed=None, w=0.0, exp=None, exp_w=0.0) -> np.ndarray:
         """blink 0..1 (1 = closed), mouth 0..1 (1 = wide open); angles in degrees. Returns an RGB picture the size of the source photo."""
         info = {k: (v.clone() if isinstance(v, torch.Tensor) else v) for k, v in self.s_info.items()}
         info["yaw"] = info["yaw"] + yaw
@@ -99,8 +129,11 @@ class Avatar:
             info["pitch"] = info["pitch"] + w * seed["pitch"]
             info["roll"] = info["roll"] + w * seed["roll"]
             info["t"] = info["t"] + w * seed["t"]
+        if exp is not None and exp_w > 0.01:  # a facial expression (smile, raised brows, ...) laid over the neutral face
+            info["exp"] = info["exp"] + exp_w * exp
         x_d = self.w.transform_keypoint(info)
-        if blink > 0.01:
+        blink = REST_BLINK + max(blink, 0.0) * (1.0 - REST_BLINK)
+        if abs(blink) > 0.01:
             eye_t = torch.tensor([[self.eye0 * (1.0 - blink)]], device=self.w.device)
             x_d = x_d + self.w.retarget_eye(self.x_s, torch.cat([self.c_s_e, eye_t], dim=1)) - self.eye_open_delta
         if mouth > 0.01:
@@ -111,6 +144,8 @@ class Avatar:
         crop = self.w.parse_output(out["out"])[0]
         return paste_back(crop, self.crop_info["M_c2o"], self.src_rgb, self.mask)
 
+
+REST_BLINK = -0.22  # < 0 = eyes slightly wider than in the photo; every animation is relative to this rest face
 
 MATTE_MODEL = HERE / "models" / "u2net_human_seg.onnx"
 
@@ -133,9 +168,10 @@ def make_matte(photo: Path, out: Path) -> bool:
     y = sess.run(None, {sess.get_inputs()[0].name: x.transpose(2, 0, 1)[None].astype(np.float32)})[0][0, 0]
     y = (y - y.min()) / max(float(y.max() - y.min()), 1e-6)
     m = cv2.resize(y, (w, h), interpolation=cv2.INTER_CUBIC)
-    m = np.clip((m - 0.35) / 0.4, 0.0, 1.0)  # firm edge, soft transition
-    m = cv2.erode(m, np.ones((3, 3), np.uint8))  # keep the old background from showing as a halo
-    m = cv2.GaussianBlur(m, (0, 0), max(1.0, w / 400))
+    m = np.clip((m - 0.5) / 0.3, 0.0, 1.0)  # firm edge, soft transition
+    k = max(3, w // 160) | 1
+    m = cv2.erode(m, np.ones((k, k), np.uint8))  # pull the edge in a little so no old background shows as a halo
+    m = cv2.GaussianBlur(m, (0, 0), max(1.2, w / 350))
     rgba = np.dstack([np.full((h, w, 3), 255, np.uint8), (m * 255).astype(np.uint8)])
     cv2.imwrite(str(out), rgba)
     print(f"matte written: {out.name}", flush=True)
@@ -156,9 +192,11 @@ class Gesture:
     """A freshly invented bit of body language: a few random poses strung together with smooth moves.
     It starts and ends at the rest pose, so it always hands back to the idle loop (and to the talking video) on the same frame."""
 
-    def __init__(self, rnd: random.Random, now: float):
+    KINDS = ["look_around", "think", "tilt", "sigh", "double_take", "ponder", "curious", "perk"]
+
+    def __init__(self, rnd: random.Random, now: float, kind: str | None = None):
         self.t0 = now
-        kind = rnd.choice(["look_around", "think", "tilt", "sigh", "double_take", "ponder", "curious"])
+        kind = kind or rnd.choice(self.KINDS)
         sgn = rnd.choice([-1, 1])
         A = lambda lo, hi: rnd.uniform(lo, hi)  # noqa: E731
         # keyframes: (seconds, yaw, pitch, roll, squint 0..1, mouth 0..1)
@@ -174,6 +212,8 @@ class Gesture:
             k = [(0, 0, 0, 0, 0, 0), (.35, sgn * A(6, 9), A(-.5, 1), sgn * A(.5, 1.5), 0, 0), (A(.9, 1.2), sgn * A(6, 9), 0, sgn, 0, 0), (A(1.5, 1.9), -sgn * A(1, 3), 0, 0, A(.3, .6), 0), (A(2.6, 3.2), 0, 0, 0, 0, 0)]
         elif kind == "ponder":
             k = [(0, 0, 0, 0, 0, 0), (A(.7, 1.1), 0, A(-3, -1.5), 0, A(.1, .3), 0), (A(1.5, 2.2), sgn * A(2, 4), A(-2.5, -1), sgn * A(.5, 1.5), A(.2, .4), A(.05, .12)), (A(2.8, 3.6), 0, 0, 0, 0, 0)]
+        elif kind == "perk":  # something caught its attention: eyes open wide, head lifts, then relaxes
+            k = [(0, 0, 0, 0, 0, 0), (A(.35, .6), sgn * A(.5, 2), A(1.5, 3), 0, -A(.5, .9), 0), (A(1.4, 2.2), sgn * A(.5, 2), A(1, 2.5), sgn * A(.3, 1), -A(.4, .8), 0), (A(2.4, 3.2), 0, 0, 0, 0, 0)]
         else:  # curious: lean in toward the screen
             k = [(0, 0, 0, 0, 0, 0), (A(.6, 1.0), sgn * A(1, 2.5), A(1.5, 3), sgn * A(1.5, 3), 0, 0), (A(2.0, 3.0), sgn * A(1, 2.5), A(1, 2.5), sgn * A(1.5, 3), 0, A(.05, .15)), (A(3.2, 4.0), 0, 0, 0, 0, 0)]
         self.kind, self.k = kind, k
@@ -187,8 +227,116 @@ class Gesture:
         for i in range(len(k) - 1):
             if k[i][0] <= t <= k[i + 1][0]:
                 f = smooth((t - k[i][0]) / max(1e-6, k[i + 1][0] - k[i][0]))
-                return tuple(a + (b - a) * f for a, b in zip(k[i][1:], k[i + 1][1:]))
+                v = [a + (b - a) * f for a, b in zip(k[i][1:], k[i + 1][1:])]
+                v[3] = min(v[3], 0.18)  # never the droopy look
+                return tuple(v)
         return None
+
+
+class Clip:
+    """One pre-made waiting animation. Every clip starts and ends exactly on the rest frame (all offsets are zero there),
+    so any clip can follow any other clip, or a pause on the rest frame, with no visible join."""
+
+    FPS = 25
+
+    def __init__(self, rnd: random.Random, kind: str):
+        self.kind = kind
+        self.g = None
+        self.blinks = []
+        if kind == "breathe":
+            self.dur = rnd.uniform(1.8, 2.8)
+            self.amp = [rnd.uniform(-1.0, 1.0) for _ in range(3)]
+        elif kind == "yawn":
+            self.dur = 2.8
+        else:
+            self.g = Gesture(rnd, 0.0, kind)
+            self.dur = self.g.dur
+        nb = 1 if kind in ("breathe", "yawn") else rnd.choice([0, 1, 1])
+        if kind != "yawn":
+            for _ in range(nb):
+                self.blinks.append(rnd.uniform(0.35, max(0.4, self.dur - 0.7)))
+        self.frames = int(round(self.dur * self.FPS))
+        self.dur = self.frames / self.FPS
+
+    def at(self, t: float) -> dict:
+        D = self.dur
+        e = bump(t / D)
+        p = dict(yaw=0.0, pitch=0.0, roll=0.0, dx=0.0, dy=0.0035 * math.sin(2 * math.pi * t / D), blink=0.0, mouth=0.0)
+        if self.kind == "breathe":
+            p["yaw"], p["pitch"], p["roll"] = self.amp[0] * e, 0.5 * self.amp[1] * e, 0.3 * self.amp[2] * e
+        elif self.kind == "yawn":
+            x = t / D
+            hold = 1.0 if 0.22 < x < 0.6 else (smooth(x / 0.22) if x <= 0.22 else smooth((0.82 - x) / 0.22))
+            hold = max(0.0, hold)
+            p.update(mouth=0.85 * hold, blink=0.65 * hold, pitch=3.0 * hold, roll=0.8 * hold)
+        else:
+            g = self.g.at(self.g.t0 + t)
+            if g is not None:
+                p.update(yaw=g[0], pitch=g[1], roll=g[2], blink=max(0.0, g[3]), mouth=g[4])
+                if g[3] < 0:
+                    p["blink"] = g[3]  # eyes wider than at rest
+        for b in self.blinks:
+            x = (t - b) / 0.19
+            if 0 <= x <= 1:
+                p["blink"] = max(p["blink"], math.sin(math.pi * x))
+        return p
+
+
+BANK_PLAN = [("breathe", 14), ("look_around", 3), ("think", 4), ("tilt", 3), ("sigh", 2), ("double_take", 2), ("ponder", 3),
+             ("curious", 3), ("perk", 3), ("yawn", 2)]
+THINK_KINDS = ("think", "ponder", "curious", "tilt")
+FFMPEG = HERE / "ffmpeg" / "ffmpeg-master-latest-win64-gpl" / "bin" / "ffmpeg.exe"
+
+
+def build_bank(av: "Avatar", folder: Path, still_current) -> None:
+    """Render the waiting animations once per person and keep them on disk, so later sessions need no rendering at all.
+    A background job: it adds a few clips at a time, and the manifest lists whatever is finished."""
+    import json
+    import subprocess
+
+    folder.mkdir(parents=True, exist_ok=True)
+    manifest_path = folder / "manifest.json"
+    rest = av.render()
+    cv2.imwrite(str(folder / "rest.jpg"), cv2.cvtColor(rest, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 95])
+    h, w = rest.shape[:2]
+    w2, h2 = w - w % 2, h - h % 2
+    try:
+        done = json.loads(manifest_path.read_text(encoding="utf-8"))["clips"]
+    except Exception:
+        done = []
+    have = {c["id"] for c in done if (folder / c["file"]).exists()}
+    done = [c for c in done if c["id"] in have]
+
+    def save():
+        manifest_path.write_text(json.dumps({"rest": "rest.jpg", "width": w2, "height": h2, "fps": Clip.FPS, "clips": done}, indent=1), encoding="utf-8")
+
+    save()
+    plan = []
+    for i in range(max(n for _, n in BANK_PLAN)):  # interleave kinds so a useful mix exists early
+        for kind, n in BANK_PLAN:
+            if i < n:
+                plan.append((kind, i))
+    rnd = random.Random()
+    for kind, i in plan:
+        cid = f"{kind}_{i:02d}"
+        if cid in have:
+            continue
+        if not still_current():
+            return
+        clip = Clip(rnd, kind)
+        out = folder / f"{cid}.mp4"
+        cmd = [str(FFMPEG), "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{w2}x{h2}", "-r", str(Clip.FPS), "-i", "-",
+               "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "17", "-preset", "veryfast", "-movflags", "+faststart", str(out)]
+        pr = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+        for f in range(clip.frames + 1):  # +1: the closing frame is the rest frame again
+            frame = av.render(**clip.at(min(f / Clip.FPS, clip.dur) if f < clip.frames else 0.0 if False else clip.dur))
+            pr.stdin.write(np.ascontiguousarray(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)[:h2, :w2]).tobytes())
+            time.sleep(0.01)  # leave the live face some room
+        pr.stdin.close()
+        pr.wait()
+        done.append({"id": cid, "file": out.name, "kind": kind, "dur": round((clip.frames + 1) / Clip.FPS, 3), "think": kind in THINK_KINDS})
+        save()
+        print(f"bank: {cid} ({len(done)} clips)", flush=True)
 
 
 class Idle:
@@ -310,7 +458,7 @@ def main():
     inf = InferenceConfig()
     inf.flag_use_half_precision = True
     pipe = LivePortraitPipeline(inference_cfg=inf, crop_cfg=CropConfig())
-    state = {"avatar": None, "user": "", "n": 0, "jpg": b"", "times": [], "seed": None, "seed_t": 0.0}
+    state = {"avatar": None, "user": "", "n": 0, "jpg": b"", "times": [], "seed": None, "seed_t": 0.0, "lib": {}}
     cond = threading.Condition()
     idle = Idle()
 
@@ -318,6 +466,11 @@ def main():
         t = time.time()
         photo = ROOT / "data" / "media" / user / "cinematic" / "source.jpg"
         state["avatar"] = Avatar(photo, pipe)
+        av = state["avatar"]
+        threading.Thread(
+            target=lambda: build_bank(av, photo.parent / "idle_bank", lambda: state["avatar"] is av),
+            daemon=True,
+        ).start()
         try:
             make_matte(photo, photo.with_name("matte.png"))
         except Exception as e:  # the avatar works fine without a cut-out
@@ -410,6 +563,24 @@ def main():
             return {"ok": True, "user": user, "seconds": round(load(user), 1)}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=404)
+
+    @app.get("/expr/sheet")
+    def expr_sheet(cols: int = 8, px: int = 200):
+        """Contact sheet of every expression in the library applied to the neutral face (for choosing which ones to use)."""
+        av, lib = state["avatar"], state["lib"]
+        tiles = []
+        for key, e in lib.items():
+            with torch.no_grad():
+                img = av.render(exp=e, exp_w=1.0)
+            img = cv2.resize(img, (px, int(px * img.shape[0] / img.shape[1])))
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            cv2.putText(img, key.replace("reaction_", "r_").replace("greeting_", "g_").replace("thinking_", "t_"), (4, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1, cv2.LINE_AA)
+            tiles.append(img)
+        while len(tiles) % cols:
+            tiles.append(np.zeros_like(tiles[0]))
+        rows = [np.hstack(tiles[i : i + cols]) for i in range(0, len(tiles), cols)]
+        ok, buf = cv2.imencode(".jpg", np.vstack(rows), [cv2.IMWRITE_JPEG_QUALITY, 88])
+        return Response(buf.tobytes(), media_type="image/jpeg")
 
     @app.get("/frame.jpg")
     def frame():
