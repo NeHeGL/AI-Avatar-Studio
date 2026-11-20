@@ -7,6 +7,7 @@ framing never changes between the idle face, the pre-made clips and the live rep
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import cv2
@@ -194,7 +195,7 @@ def invalidate(canonical_name: str, keep_pin: bool = False) -> list[str]:
         if (d / name).exists():
             shutil.rmtree(d / name, ignore_errors=True)
             done.append(name)
-    for name in ("matte.png", "source.jpg", "source_info.json"):
+    for name in ("matte.png", "source.jpg", "source_info.json", "talk_crop.png", "talk_flat.png", "talk_plate.png", "talk_matte.png", "talk_meta.json"):
         if (d / name).exists():
             (d / name).unlink(missing_ok=True)
             done.append(name)
@@ -216,9 +217,32 @@ def invalidate(canonical_name: str, keep_pin: bool = False) -> list[str]:
     return done
 
 
+def prepare_talk_person(canonical_name: str) -> None:
+    """Ask the local render service to do the one-time preparation of this person's photo (cut-out on flat gray, face crop,
+    empty-room plate, the mask the page uses). Safe to call often: the service only redoes it when the photo changes."""
+    import threading
+    import urllib.parse
+    import urllib.request
+
+    src = cinematic_dir(canonical_name) / "source.jpg"
+    if not src.exists():
+        return
+
+    def go():
+        try:
+            url = os.environ.get("AVATAR_VIDEO_URL", "http://127.0.0.1:8771") + "/prepare?" + urllib.parse.urlencode({"source": str(src)})
+            urllib.request.urlopen(urllib.request.Request(url, data=b"", method="POST"), timeout=180).read()
+        except Exception:
+            pass  # the service may still be starting; the first reply prepares the photo anyway
+
+    threading.Thread(target=go, daemon=True).start()
+
+
 def status(canonical_name: str) -> dict:
     """What the page needs to know: is there a source photo, and a pre-made clip library?"""
     src = ensure_source(canonical_name)
+    if src:
+        prepare_talk_person(canonical_name)
     d = cinematic_dir(canonical_name)
     return {"has_source": bool(src), "has_clips": (d / "manifest.json").exists(), "source_px": _px(d / "source_info.json")}
 

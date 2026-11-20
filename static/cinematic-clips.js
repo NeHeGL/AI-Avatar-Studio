@@ -65,14 +65,20 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   const fg = document.createElement("div");
   fg.style.cssText = "position:absolute;inset:0;border-radius:inherit;z-index:1;overflow:hidden;";
   figure.appendChild(fg);
-  const matteUrl = `${base}/cinematic/matte.png`;
+  const matteUrl = `${base}/cinematic/talk_matte.png`;
   const sourceUrl = `${base}/cinematic/source.jpg`;
-  const BG_KEY = `avatar-bg2-${base.split("/").pop()}`;
+  const BG_KEY = `avatar-bg4-${base.split("/").pop()}`;
   let matteReady = false;
   let bgActive = false;
   const BACKGROUNDS = {
-    original: { label: "Original" },
+    original: { label: "Room" },
+    gray: { label: "Gray", css: "#6e7680" },
     studio: { label: "Studio", css: "radial-gradient(ellipse at 50% 30%, #3b4252 0%, #232838 45%, #11141c 100%)" },
+    dark: { label: "Dark", css: "#15171c" },
+    blue: { label: "Blue", css: "linear-gradient(160deg, #3a5a8c 0%, #1d2f52 100%)" },
+    warm: { label: "Warm", css: "linear-gradient(160deg, #c9a27c 0%, #7a5a45 100%)" },
+    green: { label: "Green", css: "linear-gradient(160deg, #4f7a62 0%, #26413a 100%)" },
+    sunset: { label: "Sunset", css: "linear-gradient(180deg, #f0a35e 0%, #b4527a 55%, #3b2f5c 100%)" },
   };
   function applyBackground(key) {
     let choice = BACKGROUNDS[key];
@@ -103,7 +109,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
       /* ignore */
     }
   };
-  let bgKey = "original"; // the default look
+  let bgKey = "original"; // the default look: the room, as in the photo
   try {
     bgKey = localStorage.getItem(BG_KEY) || "original";
   } catch {
@@ -129,7 +135,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   function mountPicker() {
     if (pickerEl || disposed) return;
     pickerEl = document.createElement("div");
-    pickerEl.style.cssText = "display:flex;flex-wrap:nowrap;gap:.4rem;justify-content:center;margin:.2rem 0 .6rem;align-items:center;";
+    pickerEl.style.cssText = "display:flex;flex-wrap:wrap;gap:.4rem;justify-content:center;margin:.2rem 0 .6rem;align-items:center;";
     const mk = (key, label) => {
       const b = document.createElement("button");
       b.type = "button";

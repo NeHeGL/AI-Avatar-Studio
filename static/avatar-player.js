@@ -1,5 +1,5 @@
 import { createVoiceChat } from "/static/voice-chat.js?v=14";
-import { loadCinematic } from "/static/cinematic-clips.js?v=28";
+import { loadCinematic } from "/static/cinematic-clips.js?v=30";
 
 /**
  * The chat avatar: a photo-real face (live idle motion, pre-made clips, live reply videos) plus the voice chat.

@@ -85,7 +85,7 @@ def prepare(source: Path) -> dict:
     """One-time preparation of a person's photo (cut-out, flat gray, FlashHead crop, empty-room plate). The results are saved next
     to the photo (talk_crop.png, talk_plate.png, talk_meta.json) and only rebuilt when the photo, its cut-out or its fixes change."""
     d = source.parent
-    stamp = [source.stat().st_mtime, (d / "matte.png").stat().st_mtime, ((d / "matte_fix.json").stat().st_mtime if (d / "matte_fix.json").exists() else 0), OUT_SIZE, "plate-v2"]
+    stamp = [source.stat().st_mtime, (d / "matte.png").stat().st_mtime, ((d / "matte_fix.json").stat().st_mtime if (d / "matte_fix.json").exists() else 0), OUT_SIZE, "plate-v4"]
     hit = _PREP.get(str(source))
     if hit and hit["stamp"] == stamp:
         return hit
@@ -120,6 +120,9 @@ def prepare(source: Path) -> dict:
         small = cv2.inpaint(cv2.resize(region, (region.shape[1] // s3, region.shape[0] // s3)), cv2.resize(pm, (region.shape[1] // s3, region.shape[0] // s3)), 5, cv2.INPAINT_TELEA)
         plate[by1:by2, bx1:bx2] = np.where(pm[..., None] > 0, cv2.resize(small, (region.shape[1], region.shape[0])), region)
         cv2.imwrite(str(d / "talk_plate.png"), plate)
+        # the cleaned person mask for the page (it puts the chosen background behind everything that is not the person)
+        edge = cv2.GaussianBlur(cv2.erode(person, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))), (0, 0), 1.6)  # a hair inside the edge: no outline of the old room
+        cv2.imwrite(str(d / "talk_matte.png"), np.dstack([np.full_like(photo, 255), (edge * 255).astype(np.uint8)]))
         meta = {"stamp": stamp, "box": box}
         meta_f.write_text(json.dumps(meta), encoding="utf-8")
         print(f"prepared {source.parent.parent.parent.name}: crop box {box}", flush=True)
