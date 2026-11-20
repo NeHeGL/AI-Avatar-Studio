@@ -232,7 +232,7 @@ export async function renderNameStep(root, onSubmit) {
     root,
     `
     <section class="step-card step-card--center">
-      <p class="step-eyebrow">Account</p>
+      <p class="step-eyebrow">Account Management</p>
       <h2 class="step-title">What's your name?</h2>
       <input type="text" class="step-input step-combo" id="name-input" list="name-users" placeholder="Pick your name from the list, or type a new one" autocomplete="off" />
       <datalist id="name-users">${users.map((u) => `<option value="${u.replace(/"/g, "&quot;")}"></option>`).join("")}</datalist>
