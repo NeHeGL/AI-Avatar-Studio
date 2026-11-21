@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from app import capture, chat, walkthrough
 from app.storage import list_saved_names
-from app.storage import DATA_ROOT, purge_unsaved_user_files, seed_demo_user
+from app.storage import DATA_ROOT, migrate_legacy_layout, purge_unsaved_user_files, seed_demo_user
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static"
@@ -26,7 +26,23 @@ _launch_browser = False
 _launch_url = ""
 
 
+def _open_app_window(url: str) -> bool:
+    """Open url in its own chromeless window (Edge or Chrome app mode), like a desktop app."""
+    import shutil
+
+    roots = [os.environ.get(k, "") for k in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA")]
+    rels = [r"Microsoft\Edge\Application\msedge.exe", r"Google\Chrome\Application\chrome.exe"]
+    cands = [os.path.join(r, rel) for rel in rels for r in roots if r] + [shutil.which("msedge") or "", shutil.which("chrome") or ""]
+    for exe in cands:
+        if exe and os.path.exists(exe):
+            subprocess.Popen([exe, f"--app={url}", "--window-size=830,1150"])  # tall and narrow: the page is a single column
+            return True
+    return False
+
+
 def open_in_browser(url: str) -> bool:
+    if os.environ.get("AVATAR_WINDOW", "").lower() == "app" and _open_app_window(url):
+        return True
     if sys.platform == "win32":
         try:
             os.startfile(url)  # type: ignore[attr-defined]
@@ -171,10 +187,9 @@ class StitchFinishBody(BaseModel):
 
 
 def _scan_dir(name: str):
-    from app.capture import _user_media_dir
-    from app.storage import MEDIA_DIR
+    from app.storage import media_dir
 
-    return MEDIA_DIR / _user_media_dir(name) / "scan"
+    return media_dir(name) / "scan"
 
 
 @app.post("/api/stitch/start")
@@ -246,7 +261,9 @@ class OtherBody(BaseModel):
 
 @app.on_event("startup")
 def startup() -> None:
+    migrate_legacy_layout()
     purge_unsaved_user_files()
+    chat.warmup()  # load the chat brain, speech and voice now, so they are ready by the time a person is picked
     if os.environ.get("AVATAR_SEED_DEMO", "").strip() == "1":
         seed_demo_user()
     if _launch_browser and _launch_url:
@@ -395,8 +412,44 @@ def api_photoreal_prepare(body: PrepareBody) -> dict:
 
 @app.get("/api/chat/brain")
 def api_chat_brain() -> dict:
-    """Which Ollama model and tone the running server loaded (no GPU warmup)."""
-    return {"llm_model": chat.LLM_MODEL, "llm_mode": chat.LLM_MODE}
+    """Which chat model and tone the running server loaded (no GPU warmup)."""
+    return {"llm_model": chat.LLM_MODEL, "llm_name": chat.brain_name(), "llm_mode": chat.LLM_MODE}
+
+
+@app.post("/api/chat/warmup")
+def api_chat_warmup() -> dict:
+    """Begin loading the chat brain, speech and voice models in the background; returns what is ready so far."""
+    return chat.warmup()
+
+
+@app.get("/api/hardware")
+def api_hardware() -> dict:
+    """The graphics memory found and which mode the models were chosen for (shown bottom left)."""
+    import os
+
+    from app import hardware
+
+    t = hardware.tier()
+    label = {"large": "Full", "medium": "Medium", "small": "Compact"}[t["name"]]
+    used = total = 0.0
+    try:  # live numbers straight from the graphics card
+        import subprocess
+
+        out = subprocess.run(["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=5).stdout.split(",")
+        used, total = float(out[0]) / 1024, float(out[1]) / 1024
+    except Exception:
+        pass
+    return {
+        "vram_gb": t["vram_gb"], "used_gb": round(used, 1),
+        "total_gb": round(t["vram_gb"] if os.environ.get("AVATAR_VRAM_GB") else (total or t["vram_gb"]), 1), "mode": label,
+        "simulated": bool(os.environ.get("AVATAR_VRAM_GB")), "brain": chat.brain_name(), "ears": t["whisper_name"],
+    }
+
+
+@app.get("/api/chat/ready")
+def api_chat_ready() -> dict:
+    return chat.ready()
 
 
 @app.post("/api/chat/start")

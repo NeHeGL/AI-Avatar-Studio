@@ -134,7 +134,7 @@ export async function runFaceScan(root, canonicalName, api) {
   const wrap = document.createElement("section");
   wrap.className = "card face-scan-card orbit-card";
   wrap.innerHTML = `
-    <h2>Face scan</h2>
+    <h2>Face Scan</h2>
     <p class="scan-hint" id="scan-hint">Starting camera…</p>
     <div class="orbit-acc"><div class="orbit-acc-bar"><div id="acc-fill"></div></div><span id="acc-text">Scan accuracy: 0%</span></div>
     <p class="orbit-tip" id="scan-tip"></p>

@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from app.models import ScanAsset, VoicePhase
 from app.profile_logic import reconcile_profile
-from app.storage import MEDIA_DIR, get_working_profile, normalize_name_key, save_draft
+from app.storage import media_dir, voice_dir, get_working_profile, normalize_name_key, save_draft
 from app.walkthrough import profile_summary
 
 
@@ -68,7 +68,7 @@ def _angle_index_from_asset(asset: ScanAsset) -> int | None:
 def ingest_scan_frames(canonical_name: str, frames: list[dict]) -> dict:
     try:
         profile = get_working_profile(canonical_name)
-        scan_dir = MEDIA_DIR / _user_media_dir(canonical_name) / "scan"
+        scan_dir = media_dir(canonical_name) / "scan"
         scan_dir.mkdir(parents=True, exist_ok=True)
 
         if not frames:
@@ -143,13 +143,13 @@ def ingest_scan_frames(canonical_name: str, frames: list[dict]) -> dict:
 
 def ingest_voice(canonical_name: str, audio_base64: str, label: str) -> dict:
     profile = get_working_profile(canonical_name)
-    voice_dir = MEDIA_DIR / _user_media_dir(canonical_name) / "voice"
-    voice_dir.mkdir(parents=True, exist_ok=True)
+    vdir = voice_dir(canonical_name)
+    vdir.mkdir(parents=True, exist_ok=True)
 
     raw, mime = decode_data_url(audio_base64)
     ext = sniff_audio_ext(raw, extension_for_mime(mime))
     fname = f"{uuid4().hex[:8]}.{ext}"
-    path = voice_dir / fname
+    path = vdir / fname
     path.write_bytes(raw)
 
     profile.voice_phases.append(
@@ -169,7 +169,7 @@ def ingest_voice(canonical_name: str, audio_base64: str, label: str) -> dict:
 
 def ingest_body_frames(canonical_name: str, frames: list[dict]) -> dict:
     profile = get_working_profile(canonical_name)
-    scan_dir = MEDIA_DIR / _user_media_dir(canonical_name) / "scan"
+    scan_dir = media_dir(canonical_name) / "scan"
     scan_dir.mkdir(parents=True, exist_ok=True)
 
     for item in frames:
@@ -219,7 +219,7 @@ def save_skin_atlas(canonical_name: str, atlas_base64: str, layout: dict) -> dic
         raw, _mime = decode_data_url(atlas_base64)
         if not raw:
             return {"status": "error", "message": "Empty atlas."}
-        scan_dir = MEDIA_DIR / _user_media_dir(canonical_name) / "scan"
+        scan_dir = media_dir(canonical_name) / "scan"
         scan_dir.mkdir(parents=True, exist_ok=True)
         (scan_dir / "skin_atlas.png").write_bytes(raw)
         (scan_dir / "skin_atlas.json").write_text(_json.dumps(layout), encoding="utf-8")

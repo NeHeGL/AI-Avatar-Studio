@@ -18,16 +18,14 @@ import cv2
 import numpy as np
 
 from app.landmarks import SCRIPT, _model, _python
-from app.storage import MEDIA_DIR, get_working_profile
+from app.storage import get_working_profile, media_dir
 from app.walkthrough import media_url
 
 LEVELS = 5
 
 
 def _scan_dir(canonical_name: str) -> Path:
-    from app.capture import _user_media_dir
-
-    return MEDIA_DIR / _user_media_dir(canonical_name) / "scan"
+    return media_dir(canonical_name) / "scan"
 
 
 def _ensure_landmarks(paths: list[Path]) -> None:

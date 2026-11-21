@@ -1,4 +1,4 @@
-import { createVoiceChat } from "/static/voice-chat.js?v=17";
+import { createVoiceChat } from "/static/voice-chat.js?v=24";
 import { loadCinematic } from "/static/cinematic-clips.js?v=34";
 
 /**
@@ -16,7 +16,7 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
 
   // The first picture on screen is the person's prepared photo (the rest frame once their animations exist), never the raw scan
   // photo, so nothing in a different crop flashes up before the avatar loads.
-  const mediaBase = (stillPhoto.match(/^(.*\/media\/[^/]+)\//) || [])[1] || "";
+  const mediaBase = (stillPhoto.match(/^(.*\/profiles\/[^/]+\/media)\//) || [])[1] || "";
   const firstPic = mediaBase ? `${mediaBase}/cinematic/idle_bank/rest.jpg?t=${Date.now()}` : stillPhoto;
 
   stageEl.innerHTML = `
@@ -24,7 +24,7 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
       ${stillPhoto ? `<img id="avatar-still" src="${escapeAttr(firstPic)}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;" />` : ""}
     </div>
     <h2>${escapeHtml(name)}</h2>
-    <p id="avatar-status" class="avatar-note muted">Starting…</p>
+    <p id="avatar-status" class="avatar-note muted attention">Permissions: please allow your microphone</p>
     <div class="chat-meter" title="Your microphone level"><div class="chat-meter-bar" id="chat-meter-bar"></div><div class="chat-meter-thr" id="chat-meter-thr"></div></div>
     <div class="chat-log" id="chat-log" aria-live="polite"></div>
     <form class="chat-type" id="chat-type" autocomplete="off">
@@ -145,8 +145,9 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
   }
 
   async function startChat() {
-    statusEl.textContent = "Loading speech-to-text and voice (the first time takes a minute)…";
     try {
+      statusEl.textContent = "Permissions: please allow your microphone";
+      statusEl.classList.add("attention");
       const r = await fetch("/api/chat/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -155,7 +156,7 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
       const j = await r.json();
       if (j.status !== "ok") throw new Error(j.message || "chat could not start");
       if (destroyed) return;
-      chatBrainFoot = j.llm_model && j.llm_mode ? ` (brain: ${j.llm_model}, ${j.llm_mode})` : "";
+      chatBrainFoot = j.llm_name ? ` (${j.llm_name}${j.llm_mode ? `, ${j.llm_mode}` : ""})` : "";
       chat = createVoiceChat({
         name: profile.canonical_name,
         token: j.token,
@@ -205,6 +206,7 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
         onSpeak: (text, secs) => addLine("avatar", text, false, secs),
       });
       await chat.start();
+      statusEl.classList.remove("attention"); // the microphone was allowed
       muteBtn.disabled = false;
       cinema = await cinemaReady;
       if (!cinema) statusEl.textContent = "No photo-real face for this person yet (showing the still photo); the voice chat still works.";
@@ -212,6 +214,7 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
       chat.touch?.(); // the silence clock starts after the greeting, not while the models were loading
     } catch (e) {
       console.error(e);
+      statusEl.classList.remove("attention");
       statusEl.textContent =
         e?.name === "NotAllowedError" || e?.name === "NotFoundError"
           ? "I can't use the microphone — allow it in the browser's address bar, then reload."

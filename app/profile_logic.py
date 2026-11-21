@@ -79,6 +79,7 @@ def section_status(profile: UserProfile) -> dict:
         },
         ProfileSection.OTHER.value: {
             "complete": profile.section_complete(ProfileSection.OTHER),
+            "words": len((profile.other.notes or "").split()),
         },
         "core_complete": core_complete(profile),
     }

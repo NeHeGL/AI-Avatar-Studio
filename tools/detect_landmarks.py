@@ -1,6 +1,6 @@
 """Detect MediaPipe face landmarks in one image; print JSON to stdout.
 
-Run with a Python that has mediapipe + opencv (the Camera-Effects venv):
+Run with a Python that has mediapipe + opencv (the app's own environment):
     python detect_landmarks.py <image> <face_landmarker.task>
 
 Landmarks are normalized to the ORIGINAL image (x, y in 0..1; z in units of image width,

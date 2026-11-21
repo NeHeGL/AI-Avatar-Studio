@@ -43,7 +43,7 @@ function logOut() {
   state.profile = null;
   setCinematicMode(false);
   updateLogout();
-  boot();
+  showProfileChooser(); // straight back to the Profile Management screen (no Hello screen)
 }
 logoutBtn?.addEventListener("click", logOut);
 
@@ -92,25 +92,37 @@ function renderExistsPrompt() {
   document.getElementById("no-you").onclick = () => renderUniqueName();
 }
 
+/** What a step shows: just a green check when it has what the app needs, or a short word when something is missing. Nothing says
+ * "complete": a scan or a set of notes can always take more. The amount is in the tooltip, not on the screen. */
+const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+function sectionBadge(kind, s) {
+  if (kind === "scan") {
+    if (s.scan.complete) return { cls: "done", text: "✓", tip: plural(s.scan.count, "photo", "photos") };
+    return { cls: "pending", text: s.scan.count ? `${s.scan.count} of 4` : "Required", tip: "The face scan needs at least 4 photos" };
+  }
+  if (kind === "voice") {
+    if (s.voice.complete) return { cls: "done", text: "✓", tip: plural(s.voice.count, "recording", "recordings") };
+    return { cls: "pending", text: "Required", tip: "The avatar needs a voice recording" };
+  }
+  if (s.other.complete) return { cls: "done", text: "✓", tip: s.other.words ? plural(s.other.words, "word", "words") + " of knowledge" : "Display name set" };
+  return { cls: "optional", text: "Optional", tip: "Notes about this person make the avatar know them better" };
+}
+const badgeHtml = (b) => `<span class="badge ${b.cls}" title="${b.tip}">${b.text}</span>`;
+
 function renderSectionsList(profile) {
   const ul = document.querySelector("#sections-overview");
   if (!ul || !profile) return;
   const s = profile.sections;
-  const scanLabel = s.scan.complete
-    ? `Complete (${s.scan.count} face angles)`
-    : s.scan.count
-      ? `Incomplete (${s.scan.count}/${4} face angles)`
-      : "Not started";
-  const voiceLabel = s.voice.complete
-    ? `Complete (${s.voice.count})`
-    : s.voice.count
-      ? `Incomplete (${s.voice.count})`
-      : "Not started";
-  const otherLabel = s.other.complete ? "Complete" : "Not started";
+  const bs = sectionBadge("scan", s);
+  const bv = sectionBadge("voice", s);
+  const bo = sectionBadge("other", s);
+  const stored = (n, one, many) => (n ? plural(n, one, many) : "None");
+  ul.classList.add("stats-grid");
   ul.innerHTML = `
-    <li>Face scan <span class="badge ${s.scan.complete ? "done" : "pending"}">${scanLabel}</span></li>
-    <li>Voice <span class="badge ${s.voice.complete ? "done" : "pending"}">${voiceLabel}</span></li>
-    <li>Data <span class="badge ${s.other.complete ? "done" : "pending"}">${otherLabel}</span></li>
+    <li class="stats-head"><span>Step</span><span>Records stored</span><span>Contains data</span></li>
+    <li><span>Face Scan</span><span>${stored(s.scan.count, "photo", "photos")}</span>${badgeHtml(bs)}</li>
+    <li><span>Voice Scan</span><span>${stored(s.voice.count, "recording", "recordings")}</span>${badgeHtml(bv)}</li>
+    <li><span>Knowledge</span><span>${stored(s.other.words || 0, "word", "words")}</span>${badgeHtml(bo)}</li>
   `;
 }
 
@@ -203,9 +215,9 @@ function renderProfileHome() {
       <ul class="sections-list" id="sections-overview"></ul>
       <p class="home-hint">Choose what you'd like to do.</p>
       <div class="home-actions">
-        <button type="button" class="btn-primary" id="btn-preview">View avatar</button>
-        <button type="button" class="btn-ghost" id="btn-update">Update your avatar</button>
-        <button type="button" class="btn-ghost btn-danger" id="btn-delete">Delete and start fresh</button>
+        <button type="button" class="btn-primary" id="btn-preview">View Your Avatar</button>
+        <button type="button" class="btn-ghost" id="btn-update">Update Your Avatar</button>
+        <button type="button" class="btn-ghost btn-danger" id="btn-delete">Delete and Start Fresh</button>
       </div>
     </section>
   `;
@@ -237,20 +249,20 @@ function renderUpdateAvatarScreen() {
   const s = p.sections;
   root.innerHTML = `
     <section class="card">
-      <h2>Update your avatar</h2>
+      <h2>Update Your Avatar</h2>
       <p class="step-copy" style="text-align:left;">Each step saves when you finish it.</p>
       <div class="update-menu">
         <button type="button" class="update-menu-item" id="upd-scan">
-          <span class="update-menu-title">Face scan</span>
-          <span class="badge ${s.scan.complete ? "done" : "pending"}">${s.scan.complete ? "Complete" : "Update"}</span>
+          <span class="update-menu-title">Face Scan</span>
+          ${badgeHtml(sectionBadge("scan", s))}
         </button>
         <button type="button" class="update-menu-item" id="upd-voice">
-          <span class="update-menu-title">Voice</span>
-          <span class="badge ${s.voice.complete ? "done" : "pending"}">${s.voice.complete ? "Complete" : "Update"}</span>
+          <span class="update-menu-title">Voice Scan</span>
+          ${badgeHtml(sectionBadge("voice", s))}
         </button>
         <button type="button" class="update-menu-item" id="upd-other">
-          <span class="update-menu-title">Data</span>
-          <span class="badge ${s.other.complete ? "done" : "pending"}">${s.other.complete ? "Complete" : "Update"}</span>
+          <span class="update-menu-title">Knowledge</span>
+          ${badgeHtml(sectionBadge("other", s))}
         </button>
       </div>
       <div class="btn-row" style="margin-top:1.25rem;flex-direction:column;">
@@ -267,15 +279,17 @@ function renderUpdateAvatarScreen() {
 async function runUpdateSection(section) {
   setCinematicMode(true);
   if (section === "scan") {
-    const { runFaceScan } = await import("/static/orbit-scan.js?v=41");
+    const { runFaceScan } = await import("/static/orbit-scan.js?v=42");
     const result = await runFaceScan(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if (section === "voice") {
-    const { runVoiceCapture } = await import("/static/voice-capture.js");
+    const { runVoiceCapture } = await import("/static/voice-capture.js?v=4");
     const result = await runVoiceCapture(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
-  } else {
-    await openOtherEditor();
+  } else if ((await openOtherEditor()) === false) {
+    setCinematicMode(false); // cancelled: nothing was changed, so nothing is saved
+    renderUpdateAvatarScreen();
+    return;
   }
   await saveNewProfile(false);
   setCinematicMode(false);
@@ -292,25 +306,15 @@ function renderDeleteStep(step) {
   clearInterval(deleteTimer);
   const name = state.profile?.display_name || state.canonicalName;
   const safe = escapeHtml(name);
-  const cancel = `<button type="button" class="btn-primary" id="del-cancel">Cancel and keep this profile</button>`;
+  const cancel = `<button type="button" class="btn-primary" id="del-cancel">Cancel</button>`;
   if (step === 1) {
     root.innerHTML = `
       <section class="card home-card">
         <h2>Delete &ldquo;${safe}&rdquo;?</h2>
-        <p class="home-hint">This removes the saved profile: its details, notes and settings. It can't be undone.</p>
-        <div class="home-actions">
-          ${cancel}
-          <button type="button" class="btn-ghost btn-danger" id="del-next">Continue</button>
-        </div>
-      </section>`;
-    document.getElementById("del-next").onclick = () => renderDeleteStep(2);
-  } else if (step === 2) {
-    root.innerHTML = `
-      <section class="card home-card">
-        <h2>Are you sure?</h2>
+        <p class="home-hint">This removes the saved profile: its details, notes, photos and voice. It can't be undone.</p>
         <p class="home-hint">To confirm, type the profile's name exactly: <strong>${safe}</strong></p>
         <input type="text" class="step-input" id="del-name" placeholder="${escapeAttr(name)}" autocomplete="off" />
-        <div class="home-actions">
+        <div class="step-actions step-actions--row">
           ${cancel}
           <button type="button" class="btn-ghost btn-danger" id="del-next" disabled>Continue</button>
         </div>
@@ -321,14 +325,14 @@ function renderDeleteStep(step) {
     input.addEventListener("input", () => {
       next.disabled = input.value.trim().toLowerCase() !== name.trim().toLowerCase();
     });
-    next.onclick = () => !next.disabled && renderDeleteStep(3);
+    next.onclick = () => !next.disabled && renderDeleteStep(2);
   } else {
     let left = 5;
     root.innerHTML = `
       <section class="card home-card">
         <h2>Last chance</h2>
         <p class="home-hint">&ldquo;${safe}&rdquo; will be deleted permanently the moment you press the red button.</p>
-        <div class="home-actions">
+        <div class="step-actions step-actions--row">
           ${cancel}
           <button type="button" class="btn-ghost btn-danger" id="del-final" disabled>Delete permanently (${left})</button>
         </div>
@@ -364,23 +368,26 @@ async function finishDeleteProfile() {
   state.enteredName = "";
   state.canonicalName = "";
   state.profile = null;
-  boot();
+  updateLogout();
+  showProfileChooser(); // the deleted profile is gone from the list: straight back to Profile Management
 }
 
 async function openOtherEditor() {
   const o = state.profile?.other_preview || {};
   root.innerHTML = `
     <section class="step-card step-card--center">
-      <h2 class="step-title">Data</h2>
+      <h2 class="step-title">Knowledge</h2>
       <label class="field-label">Display name</label>
       <input type="text" class="step-input" id="other-display" value="${escapeAttr(o.display_name || state.canonicalName)}" />
       <label class="field-label">Notes</label>
       <textarea id="other-notes" rows="4">${escapeHtml(o.notes || "")}</textarea>
-      <div class="step-actions step-actions--solo">
+      <div class="step-actions step-actions--row">
+        <button type="button" class="btn-ghost" id="other-cancel">Cancel</button>
         <button type="button" class="btn-primary" id="other-save">Save</button>
       </div>
     </section>`;
-  await new Promise((resolve) => {
+  return new Promise((resolve) => {
+    document.getElementById("other-cancel").onclick = () => resolve(false); // leave without changing anything
     document.getElementById("other-save").onclick = async () => {
       const result = await api("/api/capture/other", {
         canonical_name: state.canonicalName,
@@ -388,7 +395,7 @@ async function openOtherEditor() {
         notes: document.getElementById("other-notes").value,
       });
       state.profile = result.profile;
-      resolve();
+      resolve(true);
     };
   });
 }
@@ -423,7 +430,7 @@ function renderUpdateChooser() {
       <div class="update-grid">
         <div class="update-block" data-section="scan">
           <label class="check-head">
-            <input type="checkbox" id="chk-scan" /> Scan
+            <input type="checkbox" id="chk-scan" /> Face Scan
           </label>
           <div class="preview" id="prev-scan">
             <div class="scan-thumbs">${renderScanThumbs(p.scan_previews)}</div>
@@ -431,7 +438,7 @@ function renderUpdateChooser() {
         </div>
         <div class="update-block" data-section="voice">
           <label class="check-head">
-            <input type="checkbox" id="chk-voice" /> Voice capture
+            <input type="checkbox" id="chk-voice" /> Voice Scan
           </label>
           <div class="preview" id="prev-voice">
             <div class="voice-phases" id="voice-list"></div>
@@ -439,7 +446,7 @@ function renderUpdateChooser() {
         </div>
         <div class="update-block" data-section="other">
           <label class="check-head">
-            <input type="checkbox" id="chk-other" /> Data
+            <input type="checkbox" id="chk-other" /> Knowledge
           </label>
           <div class="preview" id="prev-other">
             <div class="other-preview">${escapeHtml(formatOther(p.other_preview))}</div>
@@ -569,7 +576,7 @@ async function renderAvatar(result, afterUpdate = false) {
   const mode = result?.avatar_mode || (profile?.avatar_ready ? "live" : "placeholder");
   root.innerHTML = `<section class="card avatar-stage" id="avatar-stage"></section>`;
   const stage = document.getElementById("avatar-stage");
-  const { mountAvatarPlayer } = await import("/static/avatar-player.js?v=103");
+  const { mountAvatarPlayer } = await import("/static/avatar-player.js?v=117");
   avatarTeardown = mountAvatarPlayer(stage, profile || {}, {
     onBackProfile: () => {
       avatarTeardown?.();
@@ -581,7 +588,7 @@ async function renderAvatar(result, afterUpdate = false) {
     const note = document.createElement("p");
     note.className = "avatar-note muted";
     note.textContent =
-      "Finish face scan and voice capture for a live preview with your photo and recording.";
+      "Finish face scan and voice scan for a live preview with your photo and recording.";
     stage.appendChild(note);
   }
 }
@@ -608,7 +615,7 @@ function renderCapturePreview(profile) {
         </div>`
         )
         .join("")
-    : "<p class='capture-empty'>No voice yet — start Voice capture.</p>";
+    : "<p class='capture-empty'>No voice yet — start Voice scan.</p>";
   const otherHtml =
     other?.notes || other?.display_name
       ? `<p>${escapeHtml(other.display_name || state.canonicalName)} — ${escapeHtml(other.notes || "")}</p>`
@@ -617,8 +624,8 @@ function renderCapturePreview(profile) {
     <section class="capture-preview">
       <h3>What you've captured (draft)</h3>
       <div class="capture-block"><strong>Face</strong>${scanHtml}</div>
-      <div class="capture-block"><strong>Voice</strong><div class="voice-preview-list">${voiceHtml}</div></div>
-      <div class="capture-block"><strong>Data</strong>${otherHtml}</div>
+      <div class="capture-block"><strong>Voice Scan</strong><div class="voice-preview-list">${voiceHtml}</div></div>
+      <div class="capture-block"><strong>Knowledge</strong>${otherHtml}</div>
     </section>
   `;
 }
@@ -633,8 +640,8 @@ function renderNewUserFlow() {
       <ul class="sections-list" id="sections-overview"></ul>
       ${renderCapturePreview(p)}
       <div class="btn-row">
-        <button type="button" id="cap-scan">Face scan</button>
-        <button type="button" id="cap-voice">Voice capture</button>
+        <button type="button" id="cap-scan">Face Scan</button>
+        <button type="button" id="cap-voice">Voice Scan</button>
         <button type="button" id="cap-other">Other details</button>
       </div>
       <p class="muted" style="margin-top:1rem;font-size:0.9rem;color:var(--muted)">
@@ -654,24 +661,24 @@ function renderNewUserFlow() {
 }
 
 async function runScanFlow() {
-  const { runFaceScan } = await import("/static/orbit-scan.js?v=41");
+  const { runFaceScan } = await import("/static/orbit-scan.js?v=42");
   const result = await runFaceScan(root, state.canonicalName, api);
   if (result?.profile) {
     state.profile = result.profile;
     renderNewUserFlow();
-    setPhase("Face scan", "Angles saved to your draft.");
+    setPhase("Face Scan", "Angles saved to your draft.");
   } else {
     renderNewUserFlow();
   }
 }
 
 async function runVoiceFlow() {
-  const { runVoiceCapture } = await import("/static/voice-capture.js");
+  const { runVoiceCapture } = await import("/static/voice-capture.js?v=4");
   const result = await runVoiceCapture(root, state.canonicalName, api);
   if (result?.profile) {
     state.profile = result.profile;
     renderNewUserFlow();
-    setPhase("Voice", "Recording saved to your draft.");
+    setPhase("Voice Scan", "Recording saved to your draft.");
   } else {
     renderNewUserFlow();
   }
@@ -728,7 +735,7 @@ async function captureStub(section) {
 }
 
 function formatOther(o) {
-  if (!o) return "No extra data yet.";
+  if (!o) return "No knowledge entered yet.";
   return `Display: ${o.display_name || "—"}\nNotes: ${o.notes || "—"}\nPreferences: ${JSON.stringify(o.preferences || {}, null, 2)}`;
 }
 
@@ -750,14 +757,98 @@ import {
   runSetupPipeline,
   setCinematicMode,
   setPhaseLabels,
-} from "/static/onboarding-flow.js";
+} from "/static/onboarding-flow.js?v=3";
 
-function boot() {
+/** Startup screen: the chat brain, ears, speech engine and video animation load once, here, so everything is ready when a person is picked. */
+const STARTUP_ROWS = [
+  ["brain", "Brain", "Chat", "Gemma 3 12B"],
+  ["speech", "Ears", "Speech to Text", "Whisper large-v3 turbo"],
+  ["voice", "Voice", "Speech Engine", "Chatterbox"],
+  ["video", "Video", "Animation Engine", "SoulX FlashHead"],
+];
+const STARTUP_WORDS = { wait: "Starting…", download: "Downloading…", setup: "Setting up…", ok: "Ready", failed: "Could not install" };
+
+async function waitForStartup() {
+  const get = async () => {
+    try {
+      return await (await fetch("/api/chat/ready", { cache: "no-store" })).json();
+    } catch {
+      return null;
+    }
+  };
+  let r = await get();
+  if (r?.all) return;
+  setPhaseLabels(phaseLabel, statusHint, "", "");
+  root.innerHTML = `
+    <div class="startup-card">
+      <p class="startup-title">Starting Avatar Studio</p>
+      <p class="startup-blurb">The chat brain is a large, complex AI language model, so the very first start can take a few minutes while it downloads. After that it starts in under a minute.</p>
+      ${STARTUP_ROWS.map(
+        ([k, label, what, real]) => (real = r?.names?.[k] || real) && `
+        <div class="startup-row" data-part="${k}">
+          <span class="startup-dot"></span>
+          <span class="startup-name">${label} / <b>${what}</b> <span class="startup-real">(${real})</span></span>
+          <span class="startup-state">Starting…</span>
+          <div class="startup-bar"><i></i></div>
+        </div>`,
+      ).join("")}
+      <p class="avatar-loading-note" id="startup-note"></p>
+    </div>`;
+  fetch("/api/chat/warmup", { method: "POST" }).catch(() => {});
+  const t0 = Date.now();
+  while (!r?.all) {
+    if (r) {
+      for (const [k] of STARTUP_ROWS) {
+        const row = root.querySelector(`[data-part="${k}"]`);
+        if (!row) continue;
+        const st = r[k] || "wait";
+        const pct = r.pct?.[k] ?? 0;
+        if (r.names?.[k]) row.querySelector(".startup-real").textContent = `(${r.names[k]})`;
+        row.classList.toggle("done", st === "ok");
+        row.classList.toggle("downloading", st === "download");
+        row.querySelector(".startup-state").textContent = st === "download" ? `Downloading… ${pct}%` : STARTUP_WORDS[st] || "Starting…";
+        row.querySelector(".startup-bar i").style.width = st === "download" ? `${pct}%` : "0";
+      }
+      const note = document.getElementById("startup-note");
+      if (note && Date.now() - t0 > 90000 && !Object.values(r.pct || {}).some((v) => v > 0 && v < 100)) note.textContent = "This is taking a long time. If it never finishes, run install.bat and start again.";
+    }
+    await new Promise((res) => setTimeout(res, 500));
+    r = await get();
+  }
+}
+
+/** Bottom left: how much graphics memory was found and which mode the models were chosen for. */
+async function showHardware() {
+  const el = document.getElementById("hw-mode");
+  if (!el) return;
+  try {
+    const h = await (await fetch("/api/hardware", { cache: "no-store" })).json();
+    const used = h.used_gb ? `${h.used_gb.toFixed(1)}` : "?";
+    el.textContent = `VRAM: ${used} / ${h.total_gb.toFixed(1)} GB · ${h.mode}${h.simulated ? " (simulated)" : ""}`;
+    el.style.whiteSpace = "nowrap";
+    const over = h.used_gb && h.used_gb > h.total_gb;
+    el.style.color = over ? "#ff6b6b" : "";
+    if (over) el.textContent += " · OVER";
+    el.title = `Chat brain: ${h.brain}. Ears: ${h.ears}.`;
+  } catch {
+    /* not available: leave it empty */
+  }
+}
+
+let hwTimer = 0;
+async function boot() {
+  void showHardware();
+  clearInterval(hwTimer);
+  hwTimer = setInterval(showHardware, 3000); // keeps the memory figure live
   updateLogout();
-  renderHelloIntro(root, () => {
-    setPhaseLabels(phaseLabel, statusHint, "", "");
-    renderNameStep(root, (name, fromList) => submitName(name, fromList));
-  });
+  await waitForStartup();
+  renderHelloIntro(root, showProfileChooser);
+}
+
+/** The Profile Management screen: pick a profile, or start a new one. "Change profile" comes straight back here. */
+function showProfileChooser() {
+  setPhaseLabels(phaseLabel, statusHint, "", "");
+  renderNameStep(root, (name, fromList) => submitName(name, fromList));
 }
 
 boot();

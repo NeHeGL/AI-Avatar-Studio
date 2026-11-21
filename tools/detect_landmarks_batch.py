@@ -1,6 +1,6 @@
 """Detect MediaPipe face landmarks in MANY images with one model load; write a <image>.lm.json sidecar for each.
 
-Run with a Python that has mediapipe + opencv (the Camera-Effects venv):
+Run with a Python that has mediapipe + opencv (the app's own environment):
     python detect_landmarks_batch.py <face_landmarker.task> <image> [<image> ...]
 
 Same output format and fallbacks (several sizes, with padding) as detect_landmarks.py, so app/landmarks.py can read the sidecars.

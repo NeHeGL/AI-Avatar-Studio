@@ -1,0 +1,74 @@
+name: Release
+
+# Run by hand: Actions > Release > Run workflow, and type the version (e.g. v1.0.0).
+# It runs build_standalone.py and publishes the zip it makes as a GitHub Release.
+# "dry run" builds the zip and attaches it to the run, without tagging or publishing anything.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. v1.0.0)'
+        required: true
+      dry_run:
+        description: 'Dry run: build the zip, but do not tag or publish'
+        type: boolean
+        default: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VER: ${{ inputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Check the version
+        run: |
+          if ! [[ "$VER" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version must look like v1.0.0 (got '$VER')"; exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$VER" >/dev/null 2>&1; then
+            echo "::error::Tag $VER already exists. Pick a new version."; exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.11'
+
+      - name: Build the release zip
+        run: python build_standalone.py "$VER"
+
+      - name: Dry run - attach the zip to this run
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dry-run-${{ inputs.version }}
+          path: dist/Avatar-Studio-*.zip
+
+      - name: Create the tag and the GitHub Release
+        if: ${{ !inputs.dry_run }}
+        uses: softprops/action-gh-release@v2.3.2
+        with:
+          tag_name: ${{ inputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: "Avatar Studio ${{ inputs.version }}"
+          files: dist/Avatar-Studio-*.zip
+          body: |
+            ## Avatar Studio ${{ inputs.version }}
+
+            ### Install
+            1. Download **Avatar-Studio-${{ inputs.version }}.zip** below (not the automatic "Source code" files)
+            2. Extract it anywhere
+            3. Double-click `Start Avatar Studio App.bat` (own window) or `Start Avatar Studio Web.bat` (browser tab).
+               The first launch runs `install.bat`, which downloads and sets up everything.
+
+            ### Requirements
+            - Windows 10/11 (64-bit), Python 3.11 installed
+            - An NVIDIA graphics card (RTX 20-series or newer, 12 GB of video memory or more recommended)
+            - About 25 GB of free disk space for the one-time install, and an internet connection for it

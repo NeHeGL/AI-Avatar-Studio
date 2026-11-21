@@ -10,3 +10,20 @@ labs/
 ml/ComfyUI/
 ml/out/*.log
 ml/realtime/flashhead/
+
+# code graph, runtime data and build output (not source)
+graphify-out/
+data/
+dist/
+build/
+*.log
+*.wav
+*.mp4
+*.zip
+ml/memory/
+ml/out/
+ml/overrides.txt
+
+# chat brain downloads (setup_brain.py fetches these)
+brain/bin/
+brain/models/

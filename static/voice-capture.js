@@ -10,13 +10,13 @@ export async function runVoiceCapture(root, canonicalName, api) {
   const wrap = document.createElement("section");
   wrap.className = "card";
   wrap.innerHTML = `
-    <h2>Voice capture</h2>
+    <h2>Voice Scan</h2>
     <p>Read this aloud when you press Record (about 5 seconds):</p>
     <blockquote class="voice-script">${VOICE_SCRIPT}</blockquote>
     <div class="voice-meter" id="voice-meter" aria-hidden="true"></div>
     <p id="voice-status" class="voice-status">Microphone not started yet.</p>
     <audio id="voice-playback" controls class="hidden"></audio>
-    <div class="btn-row">
+    <div class="step-actions step-actions--row">
       <button type="button" class="btn-ghost" id="voice-cancel">Back</button>
       <button type="button" class="btn-primary" id="voice-record">Record</button>
       <button type="button" class="btn-primary hidden" id="voice-save" disabled>Continue</button>

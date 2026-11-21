@@ -135,12 +135,12 @@ export async function runSetupPipeline(ctx, opts = {}) {
   }
 
   if (needVoice) {
-    setPhaseLabels(phaseLabel, statusHint, "Voice", "");
+    setPhaseLabels(phaseLabel, statusHint, "Voice Scan", "");
     transition(
       root,
       `
       <section class="step-card step-card--center">
-        <p class="step-eyebrow">Voice</p>
+        <p class="step-eyebrow">Voice Scan</p>
         <h2 class="step-title">Teach it your voice</h2>
         <p class="step-copy">You'll read a short line aloud so your avatar can sound like you.</p>
         <div class="step-actions step-actions--solo">
@@ -157,7 +157,7 @@ export async function runSetupPipeline(ctx, opts = {}) {
         root,
         `
         <section class="step-card step-card--center">
-          <p class="step-eyebrow">Voice</p>
+          <p class="step-eyebrow">Voice Scan</p>
           <h2 class="step-title">Teach it your voice</h2>
           <p class="step-copy">You'll read a short line aloud so your avatar can sound like you.</p>
           <div class="step-actions step-actions--solo">

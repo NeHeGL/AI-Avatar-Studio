@@ -75,6 +75,7 @@ export function createVoiceChat(o) {
   let stopped = false;
   let resumeAt = 0;
   let floor = 0.004; // running estimate of room noise
+  let longestQuietMs = 0; // the longest pause inside the current stretch of sound
   let speaking = false;
   let loud = 0;
   let quietMs = 0;
@@ -259,7 +260,7 @@ export function createVoiceChat(o) {
     const threshold = Math.max(0.01, floor * 3.2);
     o.onLevel(rms, threshold);
     reportState();
-    const canInterrupt = busy && turnAudio && !replyStarted && !voiceOut;
+    const canInterrupt = false; // strict turns: from when you stop talking until the avatar has finished, the microphone records nothing
     if (ownVoice || (busy && !canInterrupt)) {
       // it is thinking or its own voice is coming out of the speakers: record nothing (no talking over each other, no echo)
       speaking = false;
@@ -295,6 +296,7 @@ export function createVoiceChat(o) {
         chunks = [...preroll];
         speechMs = 0;
         quietMs = 0;
+        longestQuietMs = 0;
         o.onStatus("Hearing you…");
       }
       return;
@@ -314,9 +316,25 @@ export function createVoiceChat(o) {
       if (mergePrev) sendHeard([]);
       return;
     }
-    livePartial();
+    // Show what it hears only when the sound is clearly louder than the room (your voice close to the microphone), so background
+    // talking does not flash in the message box.
+    if (loudMs > speechMs * 0.4) livePartial();
     quietMs = rms < threshold * 0.8 ? quietMs + ms : 0;
-    if (quietMs >= 1800 || speechMs > 25000) { // wait for a clear end: a short pause mid-sentence does not end the turn
+    longestQuietMs = Math.max(longestQuietMs, quietMs);
+    if (speechMs > 6000 && longestQuietMs < 400) {
+      // 6 s of sound with no real pause at all: a TV, a crowd, a fan. A person talking to the avatar pauses. Drop it, and raise the
+      // threshold so only a clearly louder voice (yours, close to the microphone) starts a turn.
+      floor = Math.max(floor, rms * 0.7);
+      speaking = false;
+      partialGen++;
+      o.onPartial?.("");
+      chunks = [];
+      preroll = [];
+      loud = 0;
+      if (mergePrev) sendHeard([]);
+      return;
+    }
+    if (quietMs >= 1800 || speechMs > 15000) { // wait for a clear end: a short pause mid-sentence does not end the turn
       const got = chunks;
       partialGen++;
       o.onPartial?.("");

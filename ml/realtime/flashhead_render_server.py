@@ -45,6 +45,7 @@ from flash_head.src.pipeline.flash_head_pipeline import FlashHeadPipeline  # noq
 CKPT = str(FH / "models" / "SoulX-FlashHead-1_3B")
 W2V = str(FH / "models" / "wav2vec2-base-960h")
 SEED = 42
+LEAN = os.environ.get("AVATAR_LEAN") == "1"  # set by start_all on the small (16 GB) tier only
 TAIL_S = 0.6        # silence added after the speech, so the head settles before the clip ends
 EASE_FRAMES = 10    # the last 0.4 s blend onto the rest frame
 TMP = ROOT / "data" / "tmp_render"
@@ -76,6 +77,12 @@ def prepare(source: Path) -> dict:
         H, W = photo.shape[:2]
         rgb = cv2.cvtColor(photo, cv2.COLOR_BGR2RGB)
         boxes, _ = FACE(rgb)
+        try:  # a drawing or cartoon the detector cannot read: the person can say where the face is (cinematic/options.json -> "face_box")
+            manual = json.loads((d / "options.json").read_text(encoding="utf-8")).get("face_box")
+        except Exception:
+            manual = None
+        if manual and len(boxes) == 0:
+            boxes = [manual]  # [x1, y1, x2, y2] as fractions of the picture
         if len(boxes) == 0:
             raise RuntimeError("no face found in the photo")
         x1, y1, x2, y2 = boxes[0][0] * W, boxes[0][1] * H, boxes[0][2] * W, boxes[0][3] * H
@@ -137,11 +144,8 @@ def render_reply(wav_bytes: bytes, source: Path, out_mp4: Path) -> float:
         prep = prepare(source)
         frames = _frames_for(str(wav), prep["crop_png"], tail_s=TAIL_S)
         rest = np.array(Image.open(prep["crop_png"].parent / "talk_rest.jpg").convert("RGB")).astype(np.float32)
-        n = min(EASE_FRAMES, len(frames))
-        for i in range(n):  # ease the last frames onto the rest frame so the clip ends exactly on it
-            w = (i + 1) / n
-            w = w * w * (3 - 2 * w)
-            frames[len(frames) - n + i] = ((1 - w) * frames[len(frames) - n + i].astype(np.float32) + w * rest).astype(np.uint8)
+        # start exactly on the rest frame and land exactly back on it, so a reply can follow any other clip without a visible join
+        frames = _ease(frames, rest, n_in=6, n_out=min(EASE_FRAMES, len(frames)))
         proc = subprocess.Popen(
             ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "512x512", "-r", "25", "-i", "-",
              "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "17", "-bf", "0", str(silent)],
@@ -259,7 +263,11 @@ def prepare_person(source: str):
     try:
         with LOCK:
             prepare(Path(source))
-        if not _bank_ready(Path(source)) and not _bank["running"]:  # the first time a person is seen: make their waiting animations too
+        try:  # some pictures (stylized or cartoon faces) do badly when the engine animates them at rest: stay on the still picture
+            wants_bank = json.loads((Path(source).parent / "options.json").read_text(encoding="utf-8")).get("idle_bank", True)
+        except Exception:
+            wants_bank = True
+        if wants_bank and not _bank_ready(Path(source)) and not _bank["running"]:  # the first time a person is seen: make their waiting animations too
             threading.Thread(target=build_bank, args=(Path(source),), daemon=True).start()
         return {"ok": True}
     except Exception as e:
@@ -277,6 +285,8 @@ async def render(request: Request, source: str, out: str, emotion: str = "", int
 
     try:
         secs = await asyncio.to_thread(work)
+        if LEAN:
+            torch.cuda.empty_cache()
         return {"ok": True, "path": out, "seconds": round(secs, 2)}
     except Exception as e:  # the app falls back to the animated face on any failure
         return JSONResponse({"ok": False, "error": str(e)[:300]}, status_code=500)
@@ -295,7 +305,9 @@ if __name__ == "__main__":
         import soundfile as sf
 
         sf.write(warm, np.zeros(16000, dtype=np.float32), 16000)
-        _frames_for(str(warm), next(ROOT.glob("data/media/*/cinematic/talk_crop.png"), None) or Path(FH / "examples" / "girl.png"))
+        _frames_for(str(warm), next(ROOT.glob("data/profiles/*/media/cinematic/talk_crop.png"), None) or Path(FH / "examples" / "girl.png"))
+        if LEAN:
+            torch.cuda.empty_cache()  # small cards only: hand back scratch memory the warm-up left behind
         print("warm-up done", flush=True)
     except Exception as e:  # not fatal: the first reply just takes longer
         print("warm-up skipped:", e, flush=True)

@@ -2,7 +2,7 @@
  * Photo-real layer drawn over the live avatar: pre-rendered "cinematic" clips (greeting, thinking, reactions,
  * closing) and live-rendered reply videos, all from the same wide photo so the framing never jumps.
  *
- * ml/cinematic_build.py renders the clips into data/media/<user>/cinematic/ (manifest.json + the spoken line as
+ * ml/cinematic_build.py renders the clips into data/profiles/<user>/media/cinematic/ (manifest.json + the spoken line as
  * src/<id>.wav). Replies come from the local Ditto render service via the chat server (video_url per sentence).
  * With no library the module returns null and everything falls back silently to the animated face.
  *
@@ -26,8 +26,10 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   };
   const frames = (profile.scan_frames?.length ? profile.scan_frames : profile.scan_previews) || [];
   const sample = profile.avatar_face_url || frames[0]?.url || "";
-  const base = (sample.match(/^(.*\/media\/[^/]+)\//) || [])[1];
+  // /data/profiles/<person>/media/scan/x.jpg -> base = /data/profiles/<person>/media, slug = <person>
+  const base = (sample.match(/^(.*\/profiles\/[^/]+\/media)\//) || [])[1];
   if (!base) return null;
+  const slug = base.split("/").slice(-2)[0];
 
   // The server prepares the person's photo (from whatever scan photos exist) and says if a clip library exists.
   let prep = null;
@@ -67,7 +69,7 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   figure.appendChild(fg);
   const matteUrl = `${base}/cinematic/talk_matte.png`;
   const sourceUrl = `${base}/cinematic/source.jpg`;
-  const BG_KEY = `avatar-bg4-${base.split("/").pop()}`;
+  const BG_KEY = `avatar-bg4-${slug}`;
   let matteReady = false;
   let bgActive = false;
   const BACKGROUNDS = {
@@ -460,7 +462,6 @@ export async function loadCinematic(stageEl, profile, opts = {}) {
   // Live idle layer: the same photo, alive in real time (blinks, breathing, slow drift, yawns). It sits under the videos
   // and is what you see whenever nothing is playing, so the face never freezes.
   const IDLE = opts.idleUrl || "http://localhost:8770";
-  const slug = base.split("/").pop();
   let idleOk = false;
   let idleImg = null;
   let idlePoll = 0;

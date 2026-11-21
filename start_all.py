@@ -25,8 +25,25 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 LOGS = ROOT / "data" / "tmp_render"
+BRAIN = ROOT / "brain"
+def _brain_model() -> Path:
+    """The model that fits this card, if it is there; otherwise any model the person put in brain/models."""
+    from app import hardware
+
+    want = BRAIN / "models" / hardware.tier()["brain_file"]
+    if want.exists() or os.environ.get("AVATAR_VRAM_GB"):  # a simulated smaller card must not fall back to a model that will not fit it
+        return want
+    return next(iter(sorted((BRAIN / "models").glob("*.gguf"))), want)
+
+
+BRAIN_PORT = int(os.environ.get("AVATAR_BRAIN_PORT", "8772"))
+# (name, program, arguments, log file, file that must exist)
 CHILDREN = [
-    ("video renderer", ROOT / "ml" / "realtime" / "flashhead" / ".venv" / "Scripts" / "python.exe", ROOT / "ml" / "realtime" / "flashhead_render_server.py", "flashhead.out.log"),
+    ("chat brain", BRAIN / "bin" / "llama-server.exe",
+     lambda: ["-m", _brain_model(), "--alias", "brain", "--host", "127.0.0.1", "--port", BRAIN_PORT, "-c", os.environ.get("AVATAR_LLM_CTX", "4096"), "-ngl", "99", "-np", "1", "--jinja"],
+     "brain.out.log", lambda: _brain_model()),
+    ("video renderer", Path(sys.executable), [ROOT / "ml" / "realtime" / "flashhead_render_server.py"], "flashhead.out.log",
+     ROOT / "ml" / "realtime" / "flashhead_render_server.py"),
 ]
 
 # ---- a Windows job object: when this process ends for any reason, everything in the job is closed too ----
@@ -65,15 +82,24 @@ _procs: dict[str, subprocess.Popen] = {}
 _stop = threading.Event()
 
 
-def _start(name: str, exe: Path, script: Path, log: str) -> subprocess.Popen | None:
-    if not exe.exists() or not script.exists():
-        print(f"[{name}] not found ({exe if not exe.exists() else script}); skipping")
+def _start(name: str, exe: Path, args, log: str, needs, quiet: bool = False) -> subprocess.Popen | None:
+    args = args() if callable(args) else args
+    needs = needs() if callable(needs) else needs
+    if not exe.exists() or not needs.exists():
+        if quiet:
+            return None
+        print(f"[{name}] not found ({exe if not exe.exists() else needs}); skipping" + ("  -> run install.bat" if name == "chat brain" else ""))
         return None
     LOGS.mkdir(parents=True, exist_ok=True)
     out = open(LOGS / log, "ab", buffering=0)
     out.write(f"\n=== {time.strftime('%H:%M:%S')} starting {name} ===\n".encode())
     flags = 0x08000000  # CREATE_NO_WINDOW: no console window of its own
-    p = subprocess.Popen([str(exe), str(script)], cwd=str(ROOT), stdout=out, stderr=subprocess.STDOUT, creationflags=flags)
+    env = dict(os.environ)
+    from app import hardware
+
+    if hardware.tier()["name"] == "small":
+        env["AVATAR_LEAN"] = "1"  # only the small (16 GB) tier runs the lean settings
+    p = subprocess.Popen([str(exe), *map(str, args)], cwd=str(ROOT), env=env, stdout=out, stderr=subprocess.STDOUT, creationflags=flags)
     if JOB:
         ctypes.windll.kernel32.AssignProcessToJobObject(JOB, wintypes.HANDLE(int(p._handle)))
     print(f"[{name}] started (pid {p.pid}), log: data/tmp_render/{log}")
@@ -84,16 +110,19 @@ def _watch() -> None:
     """Restart a child that has died (at most 6 times in 10 minutes, so a broken one does not spin)."""
     history: dict[str, list[float]] = {c[0]: [] for c in CHILDREN}
     while not _stop.wait(5.0):
-        for name, exe, script, log in CHILDREN:
+        for name, exe, script, log, needs in CHILDREN:
             p = _procs.get(name)
-            if p is not None and p.poll() is not None:
+            if p is None:  # was not installed at launch: start it as soon as the installer has put it in place
+                _procs[name] = _start(name, exe, script, log, needs, quiet=True)
+                continue
+            if p.poll() is not None:
                 now = time.time()
                 history[name] = [t for t in history[name] if now - t < 600]
                 if len(history[name]) >= 6:
                     continue
                 history[name].append(now)
                 print(f"[{name}] stopped (exit {p.returncode}); restarting")
-                _procs[name] = _start(name, exe, script, log)
+                _procs[name] = _start(name, exe, script, log, needs)
 
 
 def _shutdown() -> None:
@@ -103,11 +132,29 @@ def _shutdown() -> None:
             subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)], capture_output=True)
 
 
+def _clear_temp_renders() -> None:
+    """Start clean: drop last session's temp renders/logs and old reply videos so no stale video can be shown."""
+    import shutil
+
+    if LOGS.exists():
+        for f in LOGS.iterdir():
+            try:
+                shutil.rmtree(f) if f.is_dir() else f.unlink()
+            except OSError:
+                pass
+    for f in (ROOT / "data" / "profiles").glob("*/media/talk/reply_*.mp4"):
+        f.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
+    _clear_temp_renders()
     print("Avatar Studio: starting the live face and the video renderer in the background...")
-    for name, exe, script, log in CHILDREN:
-        _procs[name] = _start(name, exe, script, log)
+    for name, exe, script, log, needs in CHILDREN:
+        _procs[name] = _start(name, exe, script, log, needs)
     threading.Thread(target=_watch, daemon=True).start()
+    import installer
+
+    installer.start_background()  # anything not installed yet (chat brain, video renderer) is fetched now, in the background
     try:
         from app.main import run
 

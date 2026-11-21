@@ -256,10 +256,10 @@ def run_capture_stub(canonical_name: str, section: str, *, refresh: bool = False
     if section_enum == ProfileSection.SCAN:
         profile.scan_complete = True
         if not profile.scan_assets or refresh:
-            from app.storage import MEDIA_DIR
+            from app.storage import media_dir
             from uuid import uuid4
 
-            scan_dir = MEDIA_DIR / normalize_name_key(canonical_name).replace(" ", "_") / "scan"
+            scan_dir = media_dir(canonical_name) / "scan"
             scan_dir.mkdir(parents=True, exist_ok=True)
             fname = f"capture_{uuid4().hex[:8]}.svg"
             fpath = scan_dir / fname

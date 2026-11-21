@@ -107,6 +107,14 @@ input[type="text"]:focus {
   margin-top: 0.5rem;
 }
 
+/* form controls use the page font (browsers default them to Arial) */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
 button {
   cursor: pointer;
   border: none;
@@ -134,7 +142,7 @@ button.secondary:hover {
 
 .sections-list {
   list-style: none;
-  padding: 0;
+  padding: 0 0 0 1.25rem; /* indented under the person's name */
   margin: 1rem 0;
 }
 
@@ -159,6 +167,10 @@ button.secondary:hover {
 
 .badge.pending {
   color: var(--warn);
+}
+
+.badge.optional {
+  color: var(--muted);
 }
 
 .update-grid {
@@ -580,24 +592,9 @@ textarea {
 
 /* —— Cinematic onboarding (Apple-like) —— */
 
-body.cinematic .header h1,
-body.cinematic .footer {
-  opacity: 0;
-  height: 0;
-  margin: 0;
-  overflow: hidden;
-}
+/* The title stays on every screen, in the same place; only the screen content centres. */
 
-body.cinematic .app {
-  max-width: 520px;
-}
-
-body.cinematic .screen-root {
-  min-height: min(70vh, 640px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+/* (every screen, cinematic or not, is centered by the frame rule at the end of this file) */
 
 .screen-root.step-enter,
 .step-card.step-enter {
@@ -769,7 +766,7 @@ body.cinematic .screen-root {
 .home-hint {
   margin: 1rem 0 1.25rem;
   color: var(--muted);
-  text-align: center;
+  text-align: left;
 }
 
 .home-actions {
@@ -819,9 +816,11 @@ body.cinematic .screen-root {
 
 .step-card {
   width: 100%;
-  background: transparent;
-  border: none;
-  padding: 0.5rem 0;
+  box-sizing: border-box;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
 }
 
 .step-card--center {
@@ -1026,10 +1025,136 @@ body.cinematic .orbit-card.face-scan-card { background: transparent; border: non
 
 /* signature: under the content, right-aligned with the card (the same column as the title and the avatar box) */
 .credit {
-  margin-top: 1.25rem;
-  text-align: right;
+  margin-top: 2.75rem;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 1rem;
   font-size: 0.9rem;
   color: #a9b4c9;
   opacity: 0.9;
   user-select: none;
 }
+
+
+/* Checklist shown in place of the face until the chat can talk */
+.avatar-loading-title { margin: 0; font-size: 1.1rem; color: var(--text, #e8eef7); }
+.avatar-loading-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.45rem; text-align: left; }
+.avatar-loading-list li { color: var(--muted, #8a96a8); padding-left: 1.7rem; position: relative; }
+.avatar-loading-list li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.2em;
+  width: 0.9em;
+  height: 0.9em;
+  border-radius: 50%;
+  border: 2px solid var(--accent, #6eb5ff);
+  border-top-color: transparent;
+  animation: avatar-spin 0.9s linear infinite;
+}
+.avatar-loading-list li.done { color: var(--text, #e8eef7); }
+.avatar-loading-list li.done::before { animation: none; background: #3ddc84; border-color: #3ddc84; }
+.avatar-loading-note { margin: 0; padding: 0 1rem; font-size: 0.85rem; color: #e0a458; text-align: center; }
+@keyframes avatar-spin { to { transform: rotate(360deg); } }
+
+
+.startup-blurb { margin: 0 0 0.4rem; font-size: 0.9rem; line-height: 1.45; text-align: center; color: var(--muted, #8a96a8); }
+.startup-real { font-weight: 400; font-size: 0.85rem; color: var(--muted, #8a96a8); }
+.startup-card {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 1.2rem auto;
+  padding: 2rem 2.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  background: rgba(20, 28, 42, 0.85);
+  border: 1px solid rgba(110, 181, 255, 0.35);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.startup-title { margin: 0 0 0.3rem; font-size: 1.15rem; text-align: center; color: var(--text, #e8eef7); }
+.startup-row { display: grid; grid-template-columns: 1.1rem 1fr auto; align-items: center; column-gap: 0.7rem; row-gap: 0.35rem; color: var(--muted, #8a96a8); }
+.startup-name b { font-weight: 600; }
+.startup-state { font-size: 0.85rem; }
+.startup-dot { width: 0.9rem; height: 0.9rem; border-radius: 50%; border: 2px solid var(--accent, #6eb5ff); border-top-color: transparent; animation: avatar-spin 0.9s linear infinite; }
+.startup-row.done { color: var(--text, #e8eef7); }
+.startup-row.done .startup-dot { animation: none; background: #3ddc84; border-color: #3ddc84; }
+.startup-bar { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; display: none; }
+.startup-row.downloading .startup-bar { display: block; }
+.startup-bar i { display: block; height: 100%; width: 0; background: var(--accent, #6eb5ff); transition: width 0.3s ease; }
+
+/* keep the status line's height reserved so the page does not jump when its text first appears */
+#avatar-status { min-height: 1.5em; }
+
+/* Cancel on the left, Save on the right */
+.step-actions--row { flex-wrap: nowrap; justify-content: space-between; }
+.step-actions--row > button { flex: 1; }
+
+/* bottom left: live graphics memory and mode; bottom right: the credit */
+.credit #hw-mode { justify-self: start; text-align: left; font-variant-numeric: tabular-nums; }
+.credit #credit-text { justify-self: end; text-align: right; }
+
+/* "Permissions: please allow your microphone" stands out until the browser's prompt is answered. Same size and spacing as the normal
+   status line (colour, weight, an outline and a glow only), so nothing below it moves. */
+#avatar-status.attention {
+  width: fit-content;
+  color: #3ddc84;
+  font-weight: 700;
+  padding: 0 0.8rem;
+  outline: 1px solid rgba(61, 220, 132, 0.55);
+  outline-offset: 4px;
+  border-radius: 999px;
+  background: rgba(61, 220, 132, 0.12);
+  animation: attention-glow 1.8s ease-in-out infinite;
+}
+@keyframes attention-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(61, 220, 132, 0.35); }
+  50% { box-shadow: 0 0 14px 3px rgba(61, 220, 132, 0.45); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #avatar-status.attention { animation: none; }
+}
+
+/* The summary grid on the profile screen: item, records stored, contains data */
+.stats-grid { list-style: none; padding: 0; margin: 1rem 0; }
+.stats-grid li {
+  display: grid;
+  grid-template-columns: 1.2fr 1.2fr 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.stats-grid li:last-child { border-bottom: none; }
+.stats-grid li.stats-head { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; padding-bottom: 0.35rem; }
+.stats-grid li > :last-child { justify-self: end; text-align: right; }
+.stats-grid li > :nth-child(2) { color: var(--muted); }
+.stats-grid li.stats-head > :nth-child(2) { color: var(--muted); }
+
+/* On a short window the avatar and the chat box shrink a little, so the whole screen fits without scrolling */
+@media (max-height: 1000px) {
+  .avatar-figure.mesh { width: min(92vw, 400px, 36vh); height: min(92vw, 400px, 36vh); }
+  .chat-log { height: clamp(5rem, 16vh, 12rem); }
+}
+
+/* One fixed frame for every screen: the title stays at the top and the credit line at the bottom, in the same place every time,
+   and the main content sits in the middle between them (a taller screen simply fills more of the space). */
+.app {
+  min-height: 100vh;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+.screen-root {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.subtitle:empty { display: block; min-height: 1.4em; visibility: hidden; } /* the header keeps the same height with or without a subtitle */
+
+/* Optical centre: the header is taller than the credit line, so true centring looks low. A small lift (it moves nothing else, and the
+   chat screen, which fills the window, is left alone). */
+.screen-root > *:not(.avatar-stage) { transform: translateY(-4.5vh); }

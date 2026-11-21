@@ -1,7 +1,7 @@
 """Prepare a person's photo for the photo-real avatar (live idle face, reply videos, optional clips).
 
 Works from whatever the person has: a single photo is enough; a high-resolution wide scan frame is better.
-The result is data/media/<user>/cinematic/source.jpg, the one picture every photo-real layer is built from, so the
+The result is data/profiles/<user>/media/cinematic/source.jpg, the one picture every photo-real layer is built from, so the
 framing never changes between the idle face, the pre-made clips and the live reply videos.
 """
 from __future__ import annotations
@@ -13,13 +13,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from app.capture import _user_media_dir
 from app.profile_logic import face_assets, pick_avatar_face
-from app.storage import MEDIA_DIR, get_working_profile
+from app.storage import get_working_profile, media_dir
 
 
 def cinematic_dir(canonical_name: str) -> Path:
-    return MEDIA_DIR / _user_media_dir(canonical_name) / "cinematic"
+    return media_dir(canonical_name) / "cinematic"
 
 
 _YUNET = Path(__file__).resolve().parent.parent / "ml" / "realtime" / "models" / "face_detection_yunet_2023mar.onnx"
@@ -153,10 +152,30 @@ def ensure_source(canonical_name: str, force: bool = False) -> Path | None:
         except Exception:
             pass
         if photo_path is None:
-            face = pick_avatar_face(face_assets(profile))
-            if face is None or not Path(face.path).exists():
-                return None
-            photo_path = Path(face.path)
+            assets = [a for a in face_assets(profile) if Path(a.path).exists()]
+            explicit = [a for a in assets if (a.caption or "").startswith("Best photo")]  # a photo the person chose themselves wins
+            if not explicit and len(assets) > 1:
+                try:  # otherwise LOOK at the photos: face found, whole head, sharp, frontal, eyes open, smile
+                    from app.photo_score import rank_photos
+
+                    rows = rank_photos([Path(a.path) for a in assets])
+                    if rows and rows[0].get("face"):
+                        photo_path = Path(rows[0]["path"])
+                        o = out.parent / "options.json"  # remember the choice, so the picture every clip is made from never silently changes
+                        try:
+                            opts = json.loads(o.read_text(encoding="utf-8"))
+                        except Exception:
+                            opts = {}
+                        opts["source_photo"] = photo_path.name
+                        o.parent.mkdir(parents=True, exist_ok=True)
+                        o.write_text(json.dumps(opts, indent=1), encoding="utf-8")
+                except Exception:
+                    photo_path = None
+            if photo_path is None:
+                face = explicit[0] if explicit else pick_avatar_face(assets)
+                if face is None or not Path(face.path).exists():
+                    return None
+                photo_path = Path(face.path)
         img = cv2.imread(str(photo_path))
         if img is None:
             return None
