@@ -1211,3 +1211,4 @@ body.cinematic .orbit-card.face-scan-card { background: var(--surface); border: 
 }
 
 .orbit-card .recenter-btn { margin-top: 0.5rem; padding: 0.3rem 0.9rem; font-size: 0.85rem; }
+.avatar-stage .stage-left .chat-meter { width: 100%; max-width: 20rem; flex: none; }
