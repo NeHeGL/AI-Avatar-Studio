@@ -1200,8 +1200,8 @@ body.cinematic .orbit-card.face-scan-card { background: var(--surface); border: 
 .orbit-card .scan-texts { min-width: 0; }
 .orbit-card .scan-hint { height: calc(2 * 1.45em); }
 .orbit-card .orbit-tip { height: calc(2 * 1.4em + 1rem); }
-.orbit-card .scan-live { height: calc(4 * 1.35em); margin-top: 0; }
-.orbit-card .orbit-quality { height: calc(4 * 1.35em); }
+.orbit-card .scan-live { height: calc(5 * 1.35em); margin-top: 0; }
+.orbit-card .orbit-quality { height: calc(6 * 1.35em); }
 .orbit-card .scan-buttons { margin-top: 0.5rem; }
 .orbit-card .scan-buttons > button { padding-left: 0.6rem; padding-right: 0.6rem; font-size: 0.92rem; }
 @media (max-width: 900px) {

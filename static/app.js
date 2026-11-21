@@ -244,7 +244,7 @@ async function previewAvatar() {
 }
 
 function renderUpdateAvatarScreen() {
-  setPhase("Update", "Pick what to refresh");
+  setPhase("", ""); // the card heading says it all
   const p = state.profile;
   const s = p.sections;
   root.innerHTML = `
