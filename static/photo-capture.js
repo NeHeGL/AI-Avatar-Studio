@@ -71,7 +71,7 @@ export async function runPhotoStep(root, canonicalName, api) {
          <div class="photo-gallery">${photos
            .map(
              (p) => `<div class="photo-thumb${p.active ? " active" : ""}" data-name="${esc(p.name)}" title="${p.active ? "In use" : "Use this photo"}">
-               <img src="${esc(p.url)}" alt="Your photo" />${p.active ? '<span class="photo-tag">In use</span>' : ""}<button type="button" class="photo-del" data-del="${esc(p.name)}" title="Delete this photo">&times;</button>
+               <img src="${esc(p.url)}" alt="Your photo" />${p.active ? '<span class="photo-tag">In use</span>' : ""}<button type="button" class="photo-del" data-del="${esc(p.name)}" title="Delete this photo"></button>
              </div>`
            )
            .join("")}</div>`

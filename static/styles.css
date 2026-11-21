@@ -1288,3 +1288,5 @@ body:has(.photo-card) .app { max-width: 1120px; }
 
 .photo-del { width: 26px; height: 26px; font-size: 1.1rem; opacity: .85; }
 .photo-del:hover { background: #d9534f; opacity: 1; }
+.photo-del { display: grid; place-items: center; padding: 0; line-height: 0; font-size: 1.2rem; font-family: Arial, sans-serif; }
+.photo-del::before { content: "\00d7"; display: block; transform: translateY(-1px); }
