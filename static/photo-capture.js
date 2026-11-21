@@ -82,7 +82,7 @@ export async function runPhotoStep(root, canonicalName, api) {
     show(`
       <h2>Your Photo</h2>
       ${gallery}
-      <p class="photo-label">${photos.length >= MAX_PHOTOS ? `You have ${MAX_PHOTOS} photos, the most that can be kept. Delete one (the &times; on it) to add another.` : photos.length ? "Add another photo" : "Add a photo of your face"}</p>
+      <p class="photo-label">${photos.length ? `You can have up to ${MAX_PHOTOS} avatar photos per profile. You can delete a photo by clicking the &times;.` : "Add a photo of your face"}</p>
       <div class="photo-options${photos.length >= MAX_PHOTOS ? " full" : ""}">
         <button type="button" class="photo-option" id="ph-cam"><strong>Use your webcam</strong><span>Look at the camera. It takes the pictures by itself when you are looking straight ahead, eyes open and in focus, and keeps the best.</span></button>
         <button type="button" class="photo-option" id="ph-up"><strong>Upload a photo</strong><span>Choose a picture of your face, or drop one here. It is centred, zoomed and cropped for you.</span></button>

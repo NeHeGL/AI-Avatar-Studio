@@ -49,7 +49,7 @@ export async function runSetupPipeline(ctx, opts = {}) {
   if (needFace) {
     // The photo is required: if the step is cancelled, it starts again (the header's Change profile button leaves).
     setPhaseLabels(phaseLabel, statusHint, "", "");
-    const { runPhotoStep } = await import("/static/photo-capture.js?v=12");
+    const { runPhotoStep } = await import("/static/photo-capture.js?v=13");
     let photo = null;
     while (!photo?.profile) photo = await runPhotoStep(root, state.canonicalName, api);
     state.profile = photo.profile;
