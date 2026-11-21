@@ -3,7 +3,6 @@ ml/realtime/ffmpeg/
 __pycache__/
 *.pyc
 graphify-out/cache/
-data/media/
 
 ml/realtime/models/
 labs/
@@ -13,7 +12,6 @@ ml/realtime/flashhead/
 
 # code graph, runtime data and build output (not source)
 graphify-out/
-data/
 dist/
 build/
 *.log
@@ -27,4 +25,12 @@ ml/overrides.txt
 # chat brain downloads (setup_brain.py fetches these)
 brain/bin/
 brain/models/
-data/_server.*
+
+# people: the profile folders may exist, but nobody's data is ever committed
+data/*
+!data/profiles/
+data/profiles/*
+!data/profiles/.gitkeep
+*.gguf
+*.bak
+*.tmp
