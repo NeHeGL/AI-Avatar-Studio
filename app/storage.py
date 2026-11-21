@@ -92,20 +92,36 @@ def load_draft(name: str) -> UserProfile | None:
     return UserProfile.model_validate_json(path.read_text(encoding="utf-8"))
 
 
+_WRITE_LOCK = __import__("threading").RLock()
+
+
 def _write_safely(path: Path, text: str) -> None:
     """Write a profile file so it can never be left half written, and keep the previous version next to it (name.json.bak) so a
-    bad save or a wrong click can always be undone."""
+    bad save or a wrong click can always be undone. On Windows another request reading the file for an instant can make the final
+    swap fail, so it retries briefly and, as a last resort, writes the file directly (still keeping the .bak)."""
     import os
+    import time
+    import uuid
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists() and path.stat().st_size > 20:
+    with _WRITE_LOCK:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and path.stat().st_size > 20:
+            try:
+                (path.parent / (path.name + ".bak")).write_bytes(path.read_bytes())
+            except OSError:
+                pass
+        tmp = path.with_suffix(path.suffix + f".{uuid.uuid4().hex[:6]}.tmp")
+        tmp.write_text(text, encoding="utf-8")
         try:
-            (path.parent / (path.name + ".bak")).write_bytes(path.read_bytes())
-        except OSError:
-            pass
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+            for attempt in range(12):
+                try:
+                    os.replace(tmp, path)
+                    return
+                except PermissionError:
+                    time.sleep(0.03 * (attempt + 1))
+            path.write_text(text, encoding="utf-8")  # last resort
+        finally:
+            tmp.unlink(missing_ok=True)
 
 
 def save_draft(profile: UserProfile) -> UserProfile:
