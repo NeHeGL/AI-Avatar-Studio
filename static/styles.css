@@ -1172,7 +1172,7 @@ body.wide-stage .app { max-width: 1120px; }
 
 /* Optical centre: the header is taller than the credit line, so true centring looks low. A small lift (it moves nothing else, and the
    chat screen, which fills the window, is left alone). */
-.screen-root > *:not(.avatar-stage):not(.orbit-card) { transform: translateY(-4.5vh); }
+.screen-root > *:not(.avatar-stage):not(.orbit-card):not(.photo-card) { transform: translateY(-4.5vh); }
 
 /* side-by-side layout: the avatar may use more of the window height */
 body.wide-stage .avatar-stage .avatar-figure.mesh { width: min(400px, 50vh); height: min(400px, 50vh); }
@@ -1309,3 +1309,11 @@ body:has(.photo-card) .app { max-width: 1120px; }
 .photo-options.full .photo-option { opacity: .45; cursor: not-allowed; }
 .photo-card { --thumb: 150px; }
 .photo-gallery { gap: 8px; }
+
+/* One frame for the chat screen and the photo screens: same title and corner text positions (the photo step uses body.wide-stage too),
+   and the same card size, so moving between them changes nothing but what is inside the card. */
+:root { --stage-h: calc(min(400px, 50vh) + 164px); }
+body.wide-stage .avatar-stage { box-sizing: border-box; min-height: var(--stage-h); }
+body.wide-stage .photo-card { box-sizing: border-box; height: var(--stage-h); overflow: hidden; display: flex; flex-direction: column; padding: 1.25rem 1.5rem; }
+body.wide-stage .photo-card > .photo-label:first-of-type { margin-top: 0; }
+.photo-card { --thumb: 160px; }

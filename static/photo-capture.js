@@ -31,6 +31,7 @@ async function fileToDataUrl(file) {
 export async function runPhotoStep(root, canonicalName, api) {
   const hb = document.getElementById("logout-btn");
   if (hb) hb.style.display = "none"; // this step has its own Cancel
+  document.body.classList.add("wide-stage"); // the same frame as the chat screen: title, corner text and card in the same places
   const wrap = document.createElement("section");
   wrap.className = "card photo-card";
   let stream = null;
@@ -51,6 +52,7 @@ export async function runPhotoStep(root, canonicalName, api) {
     stopCamera();
     try { landmarker?.close(); } catch { /* ignore */ }
     if (hb) hb.style.display = "";
+    document.body.classList.remove("wide-stage");
     resolveStep(value);
   }
   function show(html) {
