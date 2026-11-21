@@ -44,7 +44,9 @@ BRAIN_PORT = int(os.environ.get("AVATAR_BRAIN_PORT", "8772"))
 # (name, program, arguments, log file, file that must exist)
 CHILDREN = [
     ("chat brain", BRAIN / "bin" / "llama-server.exe",
-     lambda: ["-m", _brain_model(), "--alias", "brain", "--host", "127.0.0.1", "--port", BRAIN_PORT, "-c", os.environ.get("AVATAR_LLM_CTX", "4096"), "-ngl", "99", "-np", "1", "--jinja"],
+     lambda: ["-m", _brain_model(), "--alias", "brain", "--host", "127.0.0.1", "--port", BRAIN_PORT, "-c", os.environ.get("AVATAR_LLM_CTX", "4096"), "-ngl", "99", "-np", "1", "--jinja",
+                       # no "thinking" out loud: some models (Gemma 4) write their reasoning first, and the avatar would speak it
+                       "--reasoning", "off", "--reasoning-format", "deepseek", "--chat-template-kwargs", '{"enable_thinking": false}'],
      "brain.out.log", lambda: _brain_model()),
     ("video renderer", Path(sys.executable), [ROOT / "ml" / "realtime" / "flashhead_render_server.py"], "flashhead.out.log",
      ROOT / "ml" / "realtime" / "flashhead_render_server.py"),
