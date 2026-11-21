@@ -128,6 +128,7 @@ export async function runFaceScan(root, canonicalName, api) {
   let lastPaintAt = 0;
   let lastDrawAt = 0;
   let pose = { yaw: 0, pitch: 0 };
+  let recenter = null; // frames still to average after the Re-center button
   const baseline = { yaw: 0, pitch: 0, n: 0, sy: 0, sp: 0, ready: false };
   const slots = Array(CELLS.length).fill(null);
 
@@ -140,6 +141,7 @@ export async function runFaceScan(root, canonicalName, api) {
         <div class="orbit-pane"><div class="scan-video-wrap orbit-video" id="scan-video-wrap"><video id="scan-video" playsinline muted autoplay></video></div><p class="orbit-cap">Your camera</p></div>
         <div class="orbit-grid" id="orbit-grid" aria-label="Pose coverage"></div>
         <p class="orbit-legend"><span class="lg red"></span> not captured &nbsp; <span class="lg yellow"></span> low quality &nbsp; <span class="lg green"></span> good</p>
+        <button type="button" class="btn-ghost recenter-btn" id="scan-recenter" title="Look straight at the camera, then click: that becomes the centre square">Re-center</button>
       </div>
       <div class="scan-right">
         <p class="scan-hint" id="scan-hint">Starting camera…</p>
@@ -1383,6 +1385,16 @@ export async function runFaceScan(root, canonicalName, api) {
       return;
     }
 
+    if (recenter) {
+      recenter.sy += rawYaw;
+      recenter.sp += rawPitch;
+      if (++recenter.n >= 8) {
+        baseline.yaw = recenter.sy / recenter.n;
+        baseline.pitch = recenter.sp / recenter.n;
+        reach.yaw = reach.up = reach.down = 0; // the range learned so far was measured from the wrong centre
+        recenter = null;
+      }
+    }
     const yaw = (flipYaw ? -1 : 1) * (rawYaw - baseline.yaw);
     const pitch = (flipPitch ? -1 : 1) * (rawPitch - baseline.pitch);
     pose = { yaw, pitch };
@@ -1577,6 +1589,7 @@ export async function runFaceScan(root, canonicalName, api) {
     const hb = document.getElementById("logout-btn");
     if (hb) hb.textContent = "Cancel";
     btnDone.onclick = () => void finishScan();
+    wrap.querySelector("#scan-recenter").onclick = () => { recenter = { n: 0, sy: 0, sp: 0 }; };
     wrap.querySelector("#flip-yaw").onclick = () => {
       flipYaw = !flipYaw;
       store.set("scanFlipYaw", flipYaw);

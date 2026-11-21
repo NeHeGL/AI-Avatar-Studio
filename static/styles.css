@@ -1209,3 +1209,5 @@ body.cinematic .orbit-card.face-scan-card { background: var(--surface); border: 
   .orbit-card .scan-cols { grid-template-columns: 1fr; }
   .orbit-card .scan-mid { grid-template-columns: 1fr; }
 }
+
+.orbit-card .recenter-btn { margin-top: 0.5rem; padding: 0.3rem 0.9rem; font-size: 0.85rem; }
