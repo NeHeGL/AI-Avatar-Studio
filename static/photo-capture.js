@@ -166,7 +166,7 @@ export async function runPhotoStep(root, canonicalName, api) {
   const CHECKS = [
     ["face", "Face found"],
     ["size", "Close enough"],
-    ["centre", "Centred"],
+    ["centre", "Whole head in view"],
     ["straight", "Looking straight at the camera"],
     ["eyes", "Eyes open"],
     ["steady", "Held still and in focus"],
@@ -204,7 +204,7 @@ export async function runPhotoStep(root, canonicalName, api) {
     show(`
       <h2>Your Photo</h2>
       <div class="photo-cam">
-        <div class="photo-video"><video id="ph-video" playsinline muted autoplay></video><div class="photo-oval"></div><div class="photo-flash" id="ph-flash"></div></div>
+        <div class="photo-video" id="ph-frame"><div class="photo-stage"><video id="ph-video" playsinline muted autoplay></video></div></div>
         <div class="photo-side">
           <p class="photo-status" id="ph-status">Starting the camera…</p>
           <ul class="photo-checks" id="ph-checks">${CHECKS.map(([k, t]) => `<li data-k="${k}"><span class="dot"></span>${t}</li>`).join("")}</ul>
@@ -221,7 +221,7 @@ export async function runPhotoStep(root, canonicalName, api) {
     const countEl = wrap.querySelector("#ph-count");
     const btnFinish = wrap.querySelector("#ph-finish");
     const btnNow = wrap.querySelector("#ph-now");
-    const flash = wrap.querySelector("#ph-flash");
+    const frame = wrap.querySelector("#ph-frame");
     wrap.querySelector("#ph-cancel").onclick = choose;
 
     try {
@@ -300,8 +300,6 @@ export async function runPhotoStep(root, canonicalName, api) {
       c.getContext("2d").drawImage(video, 0, 0);
       snaps.push({ url: c.toDataURL("image/jpeg", 0.93) });
       lastSnap = performance.now();
-      flash.classList.add("on");
-      setTimeout(() => flash.classList.remove("on"), 120);
       countEl.textContent = `${snaps.length} picture${snaps.length === 1 ? "" : "s"} taken${snaps.length < MAX_SNAPS ? ". Keep looking at the camera." : "."}`;
       btnFinish.disabled = false;
       if (snaps.length >= MAX_SNAPS || force) finish();
@@ -319,6 +317,36 @@ export async function runPhotoStep(root, canonicalName, api) {
     }
     btnFinish.onclick = finish;
     btnNow.onclick = () => snap(true);
+
+    // The preview follows you: it centres on your face and zooms so you see head and upper chest, the way the saved photo will look.
+    const cam = { cx: 0.5, cy: 0.5, s: 0 };
+    function frameTo(lm) {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return;
+      let tcx = vw / 2;
+      let tcy = vh / 2;
+      let ts = Math.min(vw, vh);
+      if (lm) {
+        const fh = (lm[152].y - lm[10].y) * vh;
+        ts = Math.max(Math.min(vw, vh) * 0.4, Math.min(fh / 0.36, Math.min(vw, vh)));
+        tcx = ((lm[234].x + lm[454].x) / 2) * vw;
+        tcy = ((lm[10].y + lm[152].y) / 2) * vh + 0.1 * ts;
+      }
+      if (!cam.s) Object.assign(cam, { cx: tcx, cy: tcy, s: ts });
+      const k = 0.18; // glide, do not jump
+      cam.cx += (tcx - cam.cx) * k;
+      cam.cy += (tcy - cam.cy) * k;
+      cam.s += (ts - cam.s) * k;
+      const s = Math.min(cam.s, vw, vh);
+      const cx = Math.max(s / 2, Math.min(vw - s / 2, cam.cx));
+      const cy = Math.max(s / 2, Math.min(vh - s / 2, cam.cy));
+      const C = frame.clientWidth || 1;
+      const sc = C / s;
+      video.style.width = `${vw * sc}px`;
+      video.style.height = `${vh * sc}px`;
+      video.style.transform = `translate(${-(cx - s / 2) * sc}px, ${-(cy - s / 2) * sc}px)`;
+    }
 
     function setChecks(state, hint) {
       for (const [k] of CHECKS) {
@@ -343,6 +371,7 @@ export async function runPhotoStep(root, canonicalName, api) {
       }
       const lm = res?.faceLandmarks?.[0];
       const st = {};
+      frameTo(lm);
       if (!lm) {
         good = 0;
         setChecks({ face: false }, "I can't see your face. Look at the camera.");
@@ -358,7 +387,7 @@ export async function runPhotoStep(root, canonicalName, api) {
       autoZoom(fhPx, vh);
       st.size = fhPx >= MIN_FACE_PX && chin - top <= 0.8;
       const inside = Math.min(...lm.map((p) => p.x)) > 0.02 && Math.max(...lm.map((p) => p.x)) < 0.98 && top > 0.02 && chin < 0.98;
-      st.centre = Math.abs(cx - 0.5) < 0.12 && Math.abs(cy - 0.5) < 0.15 && inside;
+      st.centre = inside; // the preview centres and zooms on you by itself; the whole head just has to be in the picture
       // head turn (degrees) from the face transform
       const m = res.facialTransformationMatrixes?.[0]?.data;
       let yaw = 0;
@@ -391,7 +420,7 @@ export async function runPhotoStep(root, canonicalName, api) {
       const hints = {
         face: "Only one face should be in view.",
         size: fhPx < MIN_FACE_PX ? "Move a little closer." : "Move back a little.",
-        centre: "Move to the middle of the picture, with your whole head in view.",
+        centre: "Move back a little so your whole head is in the picture.",
         straight: "Look straight at the camera and level your head.",
         eyes: "Open your eyes and relax your mouth.",
         steady: "Hold still for a moment.",

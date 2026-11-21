@@ -20,8 +20,8 @@ import numpy as np
 _MODEL = Path(__file__).resolve().parent.parent / "static" / "vendor" / "mediapipe" / "face_landmarker.task"
 _landmarker = None
 
-OUT_PX = 1024  # prepared picture size
-FACE_FRACTION = 0.42  # the face (forehead to chin) fills about this much of the picture's height: head, hair and shoulders around it
+OUT_PX = 512  # prepared picture size (the video engine works at 512)
+FACE_FRACTION = 0.36  # the face (forehead to chin) fills about this much of the picture's height: head, shoulders and upper chest
 
 
 def _lm():
@@ -125,7 +125,7 @@ def analyze(img: np.ndarray, make_crop: bool = True) -> dict:
     S = min(S, h, w)
     # the person's head sits a little above the middle of a portrait: put the face centre slightly above the crop centre
     cx = face_cx
-    cy = face_cy + 0.04 * S
+    cy = face_cy + 0.10 * S  # the face sits in the upper part of the picture, with the upper torso below it
     left = int(round(cx - S / 2))
     topc = int(round(cy - S / 2))
     left = max(0, min(left, w - int(S)))
@@ -199,8 +199,7 @@ def analyze(img: np.ndarray, make_crop: bool = True) -> dict:
     out["verdict"] = "bad" if any(i["level"] == "bad" for i in issues) else ("usable" if issues else "good")
     out["ok"] = out["verdict"] != "bad"
     if make_crop:
-        outpx = min(OUT_PX, side) if side < OUT_PX else OUT_PX
-        out["crop"] = cv2.resize(sq, (outpx, outpx), interpolation=cv2.INTER_AREA if side > outpx else cv2.INTER_CUBIC)
+        out["crop"] = cv2.resize(sq, (OUT_PX, OUT_PX), interpolation=cv2.INTER_AREA if side > OUT_PX else cv2.INTER_CUBIC)
     return out
 
 

@@ -1290,3 +1290,10 @@ body:has(.photo-card) .app { max-width: 1120px; }
 .photo-del:hover { background: #d9534f; opacity: 1; }
 .photo-del { display: grid; place-items: center; padding: 0; line-height: 0; font-size: 1.2rem; font-family: Arial, sans-serif; }
 .photo-del::before { content: "\00d7"; display: block; transform: translateY(-1px); }
+
+/* the webcam preview is a square that follows your face (no guide oval, no flash) */
+.photo-cam { grid-template-columns: minmax(260px, 420px) 1fr; }
+.photo-video { aspect-ratio: 1; }
+.photo-stage { position: absolute; inset: 0; overflow: hidden; transform: scaleX(-1); }
+.photo-stage video { position: absolute; left: 0; top: 0; max-width: none; width: auto; height: auto; object-fit: fill; transform-origin: 0 0; transform: none; }
+.photo-oval, .photo-flash { display: none; }
