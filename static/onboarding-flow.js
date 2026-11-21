@@ -28,22 +28,6 @@ function waitClick(id) {
   });
 }
 
-function waitClickEither(idA, idB) {
-  return new Promise((resolve) => {
-    const a = document.getElementById(idA);
-    const b = document.getElementById(idB);
-    const done = (which) => {
-      a.removeEventListener("click", onA);
-      b.removeEventListener("click", onB);
-      resolve(which);
-    };
-    const onA = () => done("body");
-    const onB = () => done("skip");
-    a.addEventListener("click", onA);
-    b.addEventListener("click", onB);
-  });
-}
-
 function sectionNeeds(profile, key) {
   if (!profile?.sections) return true;
   return !profile.sections[key]?.complete;
@@ -51,7 +35,6 @@ function sectionNeeds(profile, key) {
 
 /**
  * @param {object} opts
- * @param {boolean} [opts.isNewUser] offer optional body scan
  * @param {boolean} [opts.needFace] force face on/off
  * @param {boolean} [opts.needVoice] force voice on/off
  * @param {boolean} [opts.skipFinishCard] skip final “nice to meet you” (returning users)
@@ -61,7 +44,6 @@ export async function runSetupPipeline(ctx, opts = {}) {
   const prof = state.profile;
   const needFace = opts.needFace ?? sectionNeeds(prof, "scan");
   const needVoice = opts.needVoice ?? sectionNeeds(prof, "voice");
-  const offerBody = opts.isNewUser === true && needFace;
   const skipFinish = opts.skipFinishCard === true;
 
   async function faceIntro() {
@@ -89,28 +71,6 @@ export async function runSetupPipeline(ctx, opts = {}) {
       faceResult = await runFaceScan(root, state.canonicalName, api);
     }
     state.profile = faceResult.profile;
-  }
-
-  if (offerBody) {
-    setPhaseLabels(phaseLabel, statusHint, "Body", "Optional");
-    transition(
-      root,
-      `
-      <section class="step-card step-card--center">
-        <p class="step-eyebrow">Optional</p>
-        <h2 class="step-title">Fuller look?</h2>
-        <p class="step-copy">Sit back from the camera and turn in your chair about 90° for each shot — front, right, back, left. Skip if you only need your face.</p>
-        <div class="step-actions">
-          <button type="button" class="btn-primary" id="ob-body">Scan body</button>
-          <button type="button" class="btn-ghost" id="ob-skip-body">Skip</button>
-        </div>
-      </section>`
-    );
-    if ((await waitClickEither("ob-body", "ob-skip-body")) === "body") {
-      const { runBodyScan } = await import("/static/body-scan.js");
-      const bodyResult = await runBodyScan(root, state.canonicalName, api);
-      if (bodyResult?.profile) state.profile = bodyResult.profile;
-    }
   }
 
   if (needVoice) {
