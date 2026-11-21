@@ -1241,3 +1241,4 @@ body.cinematic .orbit-card.face-scan-card { background: var(--surface); border: 
 /* the tip box lines up with the top of the pose grid; Cancel / Save sit under it */
 .orbit-card .scan-right .orbit-tip { margin: 0.7rem 0 0; }
 .orbit-card .scan-right > .scan-buttons { margin-top: 0.75rem; padding-top: 0; }
+.avatar-stage .stage-right .chat-log { flex: none; height: clamp(14rem, 44vh, 24rem); min-height: 0; overflow-y: auto; }
