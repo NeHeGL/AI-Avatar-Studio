@@ -282,7 +282,7 @@ async function runUpdateSection(section) {
     const result = await runFaceScan(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if (section === "voice") {
-    const { runVoiceCapture } = await import("/static/voice-capture.js?v=5");
+    const { runVoiceCapture } = await import("/static/voice-capture.js?v=6");
     const result = await runVoiceCapture(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if ((await openOtherEditor()) === false) {
@@ -676,7 +676,7 @@ async function runScanFlow() {
 }
 
 async function runVoiceFlow() {
-  const { runVoiceCapture } = await import("/static/voice-capture.js?v=5");
+  const { runVoiceCapture } = await import("/static/voice-capture.js?v=6");
   const result = await runVoiceCapture(root, state.canonicalName, api);
   if (result?.profile) {
     state.profile = result.profile;

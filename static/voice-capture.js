@@ -1,5 +1,13 @@
+// About 40 seconds read at a normal pace: long enough to pick the cleanest stretches from, with a mix of sounds, a question and numbers.
 const VOICE_SCRIPT =
-  "Hello, I'm setting up my avatar. This is how I sound when I speak naturally.";
+  "Hello, I'm setting up my avatar, and this is how I sound when I speak naturally. " +
+  "The rainbow is a division of white light into many beautiful colors. When the sunlight strikes raindrops in the air, they act like a prism and form a rainbow. " +
+  "Have you ever stopped to watch one? I usually do. " +
+  "Some days I talk quickly, and some days I take my time, so I'll read this the way I'd say it to a friend. " +
+  "Now a few numbers: one, two, three, forty-five, and a hundred and twelve. " +
+  "Thanks for listening. That's all I needed to say.";
+const MIN_SECONDS = 20; // shorter than this and there is not enough clean speech to copy the voice from
+const MAX_SECONDS = 75;
 
 export async function runVoiceCapture(root, canonicalName, api) {
   let recorder = null;
@@ -11,7 +19,7 @@ export async function runVoiceCapture(root, canonicalName, api) {
   wrap.className = "card";
   wrap.innerHTML = `
     <h2>Voice Scan</h2>
-    <p>Read this aloud when you press Record (about 5 seconds):</p>
+    <p>Press Record and read this aloud in one go, at your normal pace and volume (about 40 seconds):</p>
     <blockquote class="voice-script">${VOICE_SCRIPT}</blockquote>
     <div class="voice-meter" id="voice-meter" aria-hidden="true"></div>
     <p id="voice-status" class="voice-status">Microphone not started yet.</p>
@@ -31,11 +39,14 @@ export async function runVoiceCapture(root, canonicalName, api) {
   const meter = wrap.querySelector("#voice-meter");
 
   let recording = false;
+  let t0 = 0;
+  let timer = null;
   let meterId = null;
 
   async function ensureMic() {
     if (stream) return stream;
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // no echo cancelling, noise suppression or automatic volume: they change the sound of the voice that is being copied
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } });
     return stream;
   }
 
@@ -95,26 +106,37 @@ export async function runVoiceCapture(root, canonicalName, api) {
           source.connect(analyser);
           animateMeter(analyser);
 
-          recorder = new MediaRecorder(stream);
+          recorder = new MediaRecorder(stream, { audioBitsPerSecond: 128000 });
           recorder.ondataavailable = (e) => chunks.push(e.data);
           recorder.onstop = () => {
             stopMeter();
+            clearInterval(timer);
+            const secs = (performance.now() - t0) / 1000;
             recordedBlob = new Blob(chunks, { type: "audio/webm" });
             playback.src = URL.createObjectURL(recordedBlob);
             playback.classList.remove("hidden");
             btnSave.classList.remove("hidden");
-            btnSave.disabled = false;
-            status.textContent = "Listen back, then Save or Record again.";
+            if (secs < MIN_SECONDS) {
+              btnSave.disabled = true;
+              status.textContent = `That was only ${Math.round(secs)} seconds. Please read the whole passage, then try again.`;
+            } else {
+              btnSave.disabled = false;
+              status.textContent = "Listen back, then Save or Record again.";
+            }
             btnRecord.textContent = "Record again";
             recording = false;
           };
           recorder.start();
           recording = true;
+          t0 = performance.now();
           btnRecord.textContent = "Stop";
-          status.textContent = "Recording… read the script naturally.";
-          setTimeout(() => {
-            if (recorder && recorder.state === "recording") recorder.stop();
-          }, 6000);
+          const tick = () => {
+            const s = Math.round((performance.now() - t0) / 1000);
+            status.textContent = `Recording… ${s} s. Read all of it, then press Stop.`;
+            if (s >= MAX_SECONDS && recorder && recorder.state === "recording") recorder.stop();
+          };
+          tick();
+          timer = setInterval(tick, 500);
         } else if (recorder && recorder.state === "recording") {
           recorder.stop();
         }

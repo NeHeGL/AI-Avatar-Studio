@@ -750,12 +750,23 @@ def start(canonical_name: str) -> dict:
         _models()
         from app.storage import voice_dir
 
-        x, sr = _load_any_audio(ref)
         ref_wav = voice_dir(key) / "_ref.wav"
         ref_wav.parent.mkdir(parents=True, exist_ok=True)
-        import soundfile as sf
+        built = None
+        try:  # the best clean speech from ALL their recordings, not just the first seconds of one
+            from app.voice_prep import build_reference
 
-        sf.write(str(ref_wav), x, sr)
+            built = build_reference(ref_wav.parent, _load_any_audio)
+        except Exception as exc:
+            _log("could not prepare the voice reference:", exc)
+        if built:
+            _log(f"voice reference: {built['seconds']:.1f}s from {built['speech_seconds']:.1f}s of speech in {len(built['sources'])} recording(s)")
+            _state["voice_key"] = None  # a rebuilt clip must be re-learned even for the same person
+        else:
+            x, sr = _load_any_audio(ref)
+            import soundfile as sf
+
+            sf.write(str(ref_wav), x, sr)
         _use_voice(key, ref_wav)
     brief: dict = {}
     try:
