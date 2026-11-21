@@ -27,3 +27,4 @@ ml/overrides.txt
 # chat brain downloads (setup_brain.py fetches these)
 brain/bin/
 brain/models/
+data/_server.*

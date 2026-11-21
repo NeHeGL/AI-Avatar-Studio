@@ -8,6 +8,7 @@
 const MP = "/static/vendor/mediapipe";
 const MAX_SNAPS = 6;
 const SNAP_GAP_MS = 700;
+const MIN_FACE_PX = 170; // forehead to chin, in camera pixels: about what you get sitting normally at a desk (the server accepts 120+ and prefers 200+)
 const GOOD_FRAMES = 3; // checks must hold this many frames in a row before a picture is taken
 const GIVE_UP_HINT_MS = 30000;
 
@@ -334,7 +335,7 @@ export async function runPhotoStep(root, canonicalName, api) {
       const fhPx = (chin - top) * vh;
       const cx = (lm[234].x + lm[454].x) / 2;
       const cy = (top + chin) / 2;
-      st.size = fhPx >= 260 && chin - top <= 0.8;
+      st.size = fhPx >= MIN_FACE_PX && chin - top <= 0.8;
       const inside = Math.min(...lm.map((p) => p.x)) > 0.02 && Math.max(...lm.map((p) => p.x)) < 0.98 && top > 0.02 && chin < 0.98;
       st.centre = Math.abs(cx - 0.5) < 0.12 && Math.abs(cy - 0.5) < 0.15 && inside;
       // head turn (degrees) from the face transform
@@ -368,7 +369,7 @@ export async function runPhotoStep(root, canonicalName, api) {
       const failing = order.find((k) => !st[k]);
       const hints = {
         face: "Only one face should be in view.",
-        size: fhPx < 260 ? "Move a little closer." : "Move back a little.",
+        size: fhPx < MIN_FACE_PX ? "Move a little closer." : "Move back a little.",
         centre: "Move to the middle of the picture, with your whole head in view.",
         straight: "Look straight at the camera and level your head.",
         eyes: "Open your eyes and relax your mouth.",
