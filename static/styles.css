@@ -1231,3 +1231,6 @@ body.cinematic .orbit-card.face-scan-card { background: var(--surface); border: 
 
 .orbit-card .scan-mid { flex: none; margin-top: 0; }
 .orbit-card .scan-right .orbit-tip { margin: 0.75rem 0 0; }
+.orbit-card .scan-head h2 { white-space: nowrap; }
+.orbit-card .scan-head .scan-hint { flex: 1; min-width: 0; font-size: 0.92rem; line-height: 1.35; }
+.orbit-card .scan-cols { grid-template-columns: minmax(230px, 250px) 1fr; }
