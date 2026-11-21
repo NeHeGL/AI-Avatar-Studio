@@ -1335,3 +1335,13 @@ body .subtitle:empty { display: none; }
 .screen-root > .card:not(.avatar-stage):not(.photo-card) > *,
 .screen-root > .step-card > *,
 .screen-root > .startup-card > * { width: 100%; max-width: 640px; margin-left: auto; margin-right: auto; box-sizing: border-box; }
+
+/* Hello screen: the same card as every other screen (rounded, same size and place), the glow kept inside it, a compact Continue button */
+.screen-root > .hello-screen {
+  box-sizing: border-box; width: 100%; height: var(--stage-h); padding: 1.25rem; margin: 0;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
+  display: flex; flex-direction: column; justify-content: center; align-items: center; overflow: hidden;
+}
+.hello-screen .hello-layers { width: 100%; margin-bottom: 2rem; }
+.hello-screen .hello-actions { width: auto; }
+.hello-screen .hello-actions .btn-pill { width: auto; min-width: 220px; padding-left: 2.5rem; padding-right: 2.5rem; }
