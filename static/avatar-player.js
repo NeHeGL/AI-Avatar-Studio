@@ -20,12 +20,16 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
   const firstPic = mediaBase ? `${mediaBase}/cinematic/idle_bank/rest.jpg?t=${Date.now()}` : stillPhoto;
 
   stageEl.innerHTML = `
+    <div class="stage-cols">
+    <div class="stage-left">
     <div class="avatar-figure mesh has-face" id="avatar">
       ${stillPhoto ? `<img id="avatar-still" src="${escapeAttr(firstPic)}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;" />` : ""}
     </div>
     <h2>${escapeHtml(name)}</h2>
     <p id="avatar-status" class="avatar-note muted attention">Permissions: please allow your microphone</p>
     <div class="chat-meter" title="Your microphone level"><div class="chat-meter-bar" id="chat-meter-bar"></div><div class="chat-meter-thr" id="chat-meter-thr"></div></div>
+    </div>
+    <div class="stage-right">
     <div class="chat-log" id="chat-log" aria-live="polite"></div>
     <form class="chat-type" id="chat-type" autocomplete="off">
       <input id="chat-input" type="text" placeholder="…or type a message" />
@@ -36,7 +40,10 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
       <button type="button" class="btn-primary" id="chat-mute" disabled>Mute mic</button>
       <button type="button" class="btn-ghost" id="back-profile">Back to profile settings</button>
     </div>
+    </div>
+    </div>
   `;
+  document.body.classList.add("wide-stage"); // this screen uses the wider frame
 
   const stillEl = stageEl.querySelector("#avatar-still");
   if (stillEl && mediaBase) {
@@ -242,6 +249,7 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
 
   return () => {
     destroyed = true;
+    document.body.classList.remove("wide-stage");
     audio?.pause();
     chat?.stop();
     cinema?.dispose();

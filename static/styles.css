@@ -1155,6 +1155,24 @@ body.cinematic .orbit-card.face-scan-card { background: transparent; border: non
 }
 .subtitle:empty { display: block; min-height: 1.4em; visibility: hidden; } /* the header keeps the same height with or without a subtitle */
 
+/* The chat screen: the avatar on the left and the conversation on the right, in a wider frame. On a narrow window it stacks again. */
+body.wide-stage .app { max-width: 1120px; }
+.avatar-stage .stage-cols { display: grid; grid-template-columns: minmax(280px, 400px) 1fr; gap: 1.75rem; align-items: stretch; text-align: left; }
+.avatar-stage .stage-left { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.avatar-stage .stage-left .avatar-figure { margin-bottom: 1rem; }
+.avatar-stage .stage-right { display: flex; flex-direction: column; min-width: 0; }
+.avatar-stage .stage-right .chat-log { flex: 1; height: auto; min-height: 14rem; max-width: none; margin: 0; }
+.avatar-stage .stage-right .chat-type { max-width: none; margin: 0.6rem 0 0; }
+.avatar-stage .stage-right .avatar-actions { margin-top: 0.75rem; }
+@media (max-width: 900px) {
+  body.wide-stage .app { max-width: 720px; }
+  .avatar-stage .stage-cols { grid-template-columns: 1fr; }
+  .avatar-stage .stage-right .chat-log { height: 12rem; flex: none; }
+}
+
 /* Optical centre: the header is taller than the credit line, so true centring looks low. A small lift (it moves nothing else, and the
    chat screen, which fills the window, is left alone). */
 .screen-root > *:not(.avatar-stage) { transform: translateY(-4.5vh); }
+
+/* side-by-side layout: the avatar may use more of the window height */
+body.wide-stage .avatar-stage .avatar-figure.mesh { width: min(400px, 50vh); height: min(400px, 50vh); }
