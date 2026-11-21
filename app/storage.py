@@ -92,15 +92,28 @@ def load_draft(name: str) -> UserProfile | None:
     return UserProfile.model_validate_json(path.read_text(encoding="utf-8"))
 
 
+def _write_safely(path: Path, text: str) -> None:
+    """Write a profile file so it can never be left half written, and keep the previous version next to it (name.json.bak) so a
+    bad save or a wrong click can always be undone."""
+    import os
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.stat().st_size > 20:
+        try:
+            (path.parent / (path.name + ".bak")).write_bytes(path.read_bytes())
+        except OSError:
+            pass
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def save_draft(profile: UserProfile) -> UserProfile:
     key = normalize_name_key(profile.canonical_name)
     draft_path(key).parent.mkdir(parents=True, exist_ok=True)
     profile.saved = False
     profile.touch()
-    draft_path(key).write_text(
-        profile.model_dump_json(indent=2),
-        encoding="utf-8",
-    )
+    _write_safely(draft_path(key), profile.model_dump_json(indent=2))
     return profile
 
 
@@ -160,10 +173,7 @@ def save_profile(profile: UserProfile) -> UserProfile:
     profile = reconcile_profile(profile)
     profile.saved = True
     profile.touch()
-    profile_path(key).write_text(
-        profile.model_dump_json(indent=2),
-        encoding="utf-8",
-    )
+    _write_safely(profile_path(key), profile.model_dump_json(indent=2))
     return profile
 
 
@@ -189,8 +199,8 @@ def commit_draft(full_name: str) -> UserProfile | None:
 def seed_demo_user() -> None:
     """Optional demo data so the returning-user path is testable."""
     key = normalize_name_key("Jeff Molofee")
-    if profile_path(key).exists():
-        return
+    if profile_path(key).exists() or profile_dir(key).exists():
+        return  # never invent a demo profile over a folder that already holds a real person's photos, voice and notes
     scan_dir = media_dir("Jeff Molofee") / "scan"
     scan_dir.mkdir(parents=True, exist_ok=True)
     voice_dir("Jeff Molofee").mkdir(parents=True, exist_ok=True)
