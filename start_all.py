@@ -30,6 +30,10 @@ def _brain_model() -> Path:
     """The model that fits this card, if it is there; otherwise any model the person put in brain/models."""
     from app import hardware
 
+    # a model the person chose themselves wins: any file named custom-*.gguf in brain/models (their own pick, e.g. an uncensored one)
+    mine = next(iter(sorted((BRAIN / "models").glob("custom-*.gguf"))), None)
+    if mine is not None and not os.environ.get("AVATAR_VRAM_GB"):
+        return mine
     want = BRAIN / "models" / hardware.tier()["brain_file"]
     if want.exists() or os.environ.get("AVATAR_VRAM_GB"):  # a simulated smaller card must not fall back to a model that will not fit it
         return want

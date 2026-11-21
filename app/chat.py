@@ -211,7 +211,8 @@ def brain_name() -> str:
     from app import hardware
 
     models = ROOT / "brain" / "models"
-    f = models / hardware.tier()["brain_file"]
+    mine = next(iter(sorted(models.glob("custom-*.gguf"))), None)  # the person's own choice wins (see start_all._brain_model)
+    f = mine if (mine is not None and not os.environ.get("AVATAR_VRAM_GB")) else models / hardware.tier()["brain_file"]
     if not f.exists():
         f = None if os.environ.get("AVATAR_VRAM_GB") else next(iter(sorted(models.glob("*.gguf"))), None)
     if f is None:

@@ -54,9 +54,8 @@ def main(cb=None) -> int:
             z.unlink()
     else:
         print("llama-server already installed.")
-    target = MODELS / MODEL_URL.rsplit("/", 1)[1]
-    # normally any model in the folder will do; when a smaller card is being simulated, that card's own model is needed
-    need = not target.exists() if os.environ.get("AVATAR_VRAM_GB") else not any(MODELS.glob("*.gguf"))
+    target = MODELS / hardware.tier()["brain_file"]  # saved under this card's own model name
+    need = not target.exists()
     if need:
         fetch(MODEL_URL, target, cb)
     else:

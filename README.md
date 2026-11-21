@@ -24,3 +24,8 @@ Windows 10/11, an NVIDIA graphics card (RTX 20-series or newer, 12 GB or more of
 | `ml/` | Speech and voice code, the video renderer, and the Python environment |
 | `tools/` | Face-landmark helpers |
 | `data/profiles/<name>/` | One folder per person: `knowledge/` (who they are, their people and life), `media/`, `voice/` |
+
+## Use your own chat model
+
+The chat brain is a standard Gemma 3 model chosen for your graphics card. To use a different one (for example an uncensored model), put its `.gguf` file in `brain/models/` and name it `custom-<anything>.gguf`. A file with that prefix is used instead of the built-in choice. Delete it to go back.
+

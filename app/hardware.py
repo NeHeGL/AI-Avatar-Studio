@@ -44,8 +44,10 @@ def tier() -> dict:
         if gb >= minimum - 1.5:
             return {
                 "name": name, "vram_gb": round(gb, 1), "brain_size": size, "whisper": whisper, "whisper_name": whisper_name, "whisper_device": whisper_device,
-                "brain_file": f"gemma-3-{size}-it-Q4_K_M.gguf",
-                "brain_url": f"https://huggingface.co/ggml-org/gemma-3-{size}-it-GGUF/resolve/main/gemma-3-{size}-it-Q4_K_M.gguf",
+                # Gemma 3 with its refusal behaviour removed ("abliterated", mlabonne v2): the same size and speed as the stock model, but it
+                # does not lecture or refuse in casual private chat. The stock ggml-org build refuses a lot even with a relaxed prompt.
+                "brain_file": f"gemma-3-{size}-it-abliterated-v2-Q4_K_M.gguf",
+                "brain_url": f"https://huggingface.co/mlabonne/gemma-3-{size}-it-abliterated-v2-GGUF/resolve/main/gemma-3-{size}-it-abliterated-v2.q4_k_m.gguf",
             }
     raise RuntimeError("no tier")
 
