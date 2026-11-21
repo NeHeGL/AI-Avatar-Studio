@@ -266,10 +266,10 @@ export async function runFaceScan(root, canonicalName, api) {
     const worst = Math.min(size, stab, centre);
     let advice = "";
     if (worst >= 0.85) advice = "Photo quality is good.";
-    else if (worst === size) advice = `Move closer: your face is about ${pct(faceW)}% of the picture height, aim for 50% or more.`;
+    else if (worst === size) advice = `Move closer.`;
     else if (worst === stab) advice = "Hold still for half a second at each position; moving blurs the photo.";
     else advice = "Keep your face in the middle of the camera view.";
-    return `Photo quality right now — face size ${pct(size)}% · steadiness ${pct(stab)}% · centring ${pct(centre)}%. ${advice}\n${toneReport()}`;
+    return `Photo quality right now — face size ${pct(faceW)}% of the picture height (aim for 50%) · steadiness ${pct(stab)}% · centring ${pct(centre)}%. ${advice}\n${toneReport()}`;
   }
 
   function refresh() {
