@@ -33,8 +33,6 @@ function setPhase(label, hint = "") {
 
 /** Leave the current person: stop the chat and the microphone, forget who was chosen, go back to the start (name) screen. */
 function logOut() {
-  // a screen (the face scan) can claim the button as "Cancel"
-  if (!document.dispatchEvent(new CustomEvent("header-cancel", { cancelable: true }))) return;
   if (talkInterval) clearInterval(talkInterval);
   if (avatarTeardown) {
     avatarTeardown();
@@ -281,7 +279,7 @@ function renderUpdateAvatarScreen() {
 async function runUpdateSection(section) {
   setCinematicMode(true);
   if (section === "scan") {
-    const { runFaceScan } = await import("/static/orbit-scan.js?v=53");
+    const { runFaceScan } = await import("/static/orbit-scan.js?v=54");
     const result = await runFaceScan(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if (section === "voice") {
@@ -663,7 +661,7 @@ function renderNewUserFlow() {
 }
 
 async function runScanFlow() {
-  const { runFaceScan } = await import("/static/orbit-scan.js?v=53");
+  const { runFaceScan } = await import("/static/orbit-scan.js?v=54");
   const result = await runFaceScan(root, state.canonicalName, api);
   if (result?.profile) {
     state.profile = result.profile;

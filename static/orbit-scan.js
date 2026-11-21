@@ -165,8 +165,8 @@ export async function runFaceScan(root, canonicalName, api) {
           </div>
         </div>
         <div class="step-actions step-actions--row scan-buttons">
-          <button type="button" class="btn-ghost" id="scan-cancel">Back</button>
-          <button type="button" class="btn-primary" id="scan-done" disabled>Done scanning</button>
+          <button type="button" class="btn-ghost" id="scan-cancel">Cancel</button>
+          <button type="button" class="btn-primary" id="scan-done" disabled>Save</button>
         </div>
       </div>
     </div>
@@ -304,8 +304,8 @@ export async function runFaceScan(root, canonicalName, api) {
     else if (!baseline.ready) hint.textContent = "Look straight at the camera and hold still for a moment…";
     else if (acc < DONE_AT)
       hint.textContent = "Sit close (your face should fill about half the view), keep even light on your face, and move your head slowly — pausing half a second at each extreme.";
-    else if (acc < 85) hint.textContent = "Good. Keep moving to fill the remaining dots, or tap Done.";
-    else hint.textContent = "Excellent coverage — tap Done.";
+    else if (acc < 85) hint.textContent = "Good. Keep moving to fill the remaining dots, or tap Save.";
+    else hint.textContent = "Excellent coverage — tap Save.";
     return acc;
   }
 
@@ -1503,13 +1503,11 @@ export async function runFaceScan(root, canonicalName, api) {
   }
 
   let resolveScan = null;
-  const onHeaderCancel = (e) => { e.preventDefault(); completeAndExit(null); };
   function completeAndExit(value) {
     if (settled) return;
     settled = true;
-    document.removeEventListener("header-cancel", onHeaderCancel);
     const hb = document.getElementById("logout-btn");
-    if (hb) hb.textContent = "Change profile";
+    if (hb) hb.style.display = ""; // the header button comes back
     if (previewTimer) clearInterval(previewTimer);
     stopCamera();
     resolveScan?.(value);
@@ -1619,9 +1617,8 @@ export async function runFaceScan(root, canonicalName, api) {
     root.appendChild(wrap);
     resolveScan = resolve;
     btnCancel.onclick = () => completeAndExit(null);
-    document.addEventListener("header-cancel", onHeaderCancel);
     const hb = document.getElementById("logout-btn");
-    if (hb) hb.textContent = "Cancel";
+    if (hb) hb.style.display = "none"; // the scan has its own Cancel and Save
     btnDone.onclick = () => void finishScan();
     wrap.querySelector("#scan-recenter").onclick = () => { recenter = { n: 0, sy: 0, sp: 0 }; };
     (async () => {
