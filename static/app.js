@@ -98,7 +98,7 @@ const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`
 function sectionBadge(kind, s) {
   if (kind === "scan") {
     if (s.scan.complete) return { cls: "done", text: "✓", tip: plural(s.scan.count, "photo", "photos") };
-    return { cls: "pending", text: s.scan.count ? `${s.scan.count} of 4` : "Required", tip: "The face scan needs at least 4 photos" };
+    return { cls: "pending", text: "Required", tip: "A photo of your face is needed" };
   }
   if (kind === "voice") {
     if (s.voice.complete) return { cls: "done", text: "✓", tip: plural(s.voice.count, "recording", "recordings") };
@@ -120,7 +120,7 @@ function renderSectionsList(profile) {
   ul.classList.add("stats-grid");
   ul.innerHTML = `
     <li class="stats-head"><span>Step</span><span>Records stored</span><span>Contains data</span></li>
-    <li><span>Face Scan</span><span>${stored(s.scan.count, "photo", "photos")}</span>${badgeHtml(bs)}</li>
+    <li><span>Photo</span><span>${stored(s.scan.count, "photo", "photos")}</span>${badgeHtml(bs)}</li>
     <li><span>Voice Scan</span><span>${stored(s.voice.count, "recording", "recordings")}</span>${badgeHtml(bv)}</li>
     <li><span>Knowledge</span><span>${stored(s.other.words || 0, "word", "words")}</span>${badgeHtml(bo)}</li>
   `;
@@ -183,7 +183,7 @@ async function handleReturningUser() {
       <section class="step-card step-card--center">
         <p class="step-eyebrow">Welcome back</p>
         <h2 class="step-title">Let's finish your setup</h2>
-        <p class="step-copy">We'll only ask for what's still missing — face scan, voice, or both.</p>
+        <p class="step-copy">We'll only ask for what's still missing — photo, voice, or both.</p>
         <div class="step-actions step-actions--solo">
           <button type="button" class="btn-primary" id="resume-continue">Continue</button>
         </div>
@@ -252,7 +252,7 @@ function renderUpdateAvatarScreen() {
       <h2>Update Your Avatar</h2>
       <div class="update-menu">
         <button type="button" class="update-menu-item" id="upd-scan">
-          <span class="update-menu-title">Face Scan</span>
+          <span class="update-menu-title">Photo</span>
           ${badgeHtml(sectionBadge("scan", s))}
         </button>
         <button type="button" class="update-menu-item" id="upd-voice">
@@ -278,8 +278,8 @@ function renderUpdateAvatarScreen() {
 async function runUpdateSection(section) {
   setCinematicMode(true);
   if (section === "scan") {
-    const { runFaceScan } = await import("/static/orbit-scan.js?v=59");
-    const result = await runFaceScan(root, state.canonicalName, api);
+    const { runPhotoStep } = await import("/static/photo-capture.js?v=1");
+    const result = await runPhotoStep(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if (section === "voice") {
     const { runVoiceCapture } = await import("/static/voice-capture.js?v=6");
@@ -433,7 +433,7 @@ function renderUpdateChooser() {
       <div class="update-grid">
         <div class="update-block" data-section="scan">
           <label class="check-head">
-            <input type="checkbox" id="chk-scan" /> Face Scan
+            <input type="checkbox" id="chk-scan" /> Photo
           </label>
           <div class="preview" id="prev-scan">
             <div class="scan-thumbs">${renderScanThumbs(p.scan_previews)}</div>
@@ -591,7 +591,7 @@ async function renderAvatar(result, afterUpdate = false) {
     const note = document.createElement("p");
     note.className = "avatar-note muted";
     note.textContent =
-      "Finish face scan and voice scan for a live preview with your photo and recording.";
+      "Add your photo and voice for a live preview with your photo and recording.";
     stage.appendChild(note);
   }
 }
@@ -607,7 +607,7 @@ function renderCapturePreview(profile) {
             `<img src="${escapeAttr(x.url)}" alt="${escapeAttr(x.caption)}" title="${escapeAttr(x.caption)}" />`
         )
         .join("")}</div>`
-    : "<p class='capture-empty'>No face angles yet — start Face scan.</p>";
+    : "<p class='capture-empty'>No photo yet.</p>";
   const voiceHtml = voices.length
     ? voices
         .map(
@@ -643,7 +643,7 @@ function renderNewUserFlow() {
       <ul class="sections-list" id="sections-overview"></ul>
       ${renderCapturePreview(p)}
       <div class="btn-row">
-        <button type="button" id="cap-scan">Face Scan</button>
+        <button type="button" id="cap-scan">Photo</button>
         <button type="button" id="cap-voice">Voice Scan</button>
         <button type="button" id="cap-other">Other details</button>
       </div>
@@ -664,12 +664,12 @@ function renderNewUserFlow() {
 }
 
 async function runScanFlow() {
-  const { runFaceScan } = await import("/static/orbit-scan.js?v=55");
-  const result = await runFaceScan(root, state.canonicalName, api);
+  const { runPhotoStep } = await import("/static/photo-capture.js?v=1");
+  const result = await runPhotoStep(root, state.canonicalName, api);
   if (result?.profile) {
     state.profile = result.profile;
     renderNewUserFlow();
-    setPhase("Face Scan", "Angles saved to your draft.");
+    setPhase("Photo", "Photo saved to your draft.");
   } else {
     renderNewUserFlow();
   }
@@ -760,7 +760,7 @@ import {
   runSetupPipeline,
   setCinematicMode,
   setPhaseLabels,
-} from "/static/onboarding-flow.js?v=5";
+} from "/static/onboarding-flow.js?v=6";
 
 /** Startup screen: the chat brain, ears, speech engine and video animation load once, here, so everything is ready when a person is picked. */
 const STARTUP_ROWS = [

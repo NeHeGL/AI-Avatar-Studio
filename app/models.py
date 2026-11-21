@@ -58,10 +58,10 @@ class UserProfile(BaseModel):
     saved: bool = False
 
     def section_complete(self, section: ProfileSection) -> bool:
-        from app.profile_logic import face_assets
+        from app.profile_logic import MIN_FACE_ANGLES, face_assets
 
         if section == ProfileSection.SCAN:
-            return self.scan_skipped or len(face_assets(self)) >= 4
+            return self.scan_skipped or len(face_assets(self)) >= MIN_FACE_ANGLES
         if section == ProfileSection.VOICE:
             return any((p.path or "").strip() for p in self.voice_phases)
         return bool(

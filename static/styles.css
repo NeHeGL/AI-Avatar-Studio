@@ -1242,3 +1242,46 @@ body.cinematic .orbit-card.face-scan-card { background: var(--surface); border: 
 .orbit-card .scan-right .orbit-tip { margin: 0.7rem 0 0; }
 .orbit-card .scan-right > .scan-buttons { margin-top: 0.75rem; padding-top: 0; }
 .avatar-stage .stage-right .chat-log { flex: none; height: clamp(14rem, 44vh, 24rem); min-height: 0; overflow-y: auto; }
+
+/* ---- Your Photo: upload or webcam ---- */
+body:has(.photo-card) .app { max-width: 1120px; }
+.photo-card { text-align: left; }
+.photo-card h2 { margin: 0 0 0.8rem; }
+.photo-label { color: var(--muted); margin: 0.6rem 0 0.4rem; font-size: 0.95rem; }
+.photo-options { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 0.4rem 0 1rem; }
+.photo-option { text-align: left; background: var(--surface); border: 1px solid var(--border); color: inherit; border-radius: 14px; padding: 1.1rem 1.25rem; cursor: pointer; display: flex; flex-direction: column; gap: 0.4rem; font: inherit; }
+.photo-option:hover { border-color: var(--accent, #4f9cff); }
+.photo-option strong { font-size: 1.1rem; }
+.photo-option span { color: var(--muted); font-size: 0.9rem; line-height: 1.4; }
+.photo-gallery { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.photo-thumb { position: relative; width: 110px; height: 110px; border-radius: 12px; overflow: hidden; border: 2px solid transparent; cursor: pointer; background: #000; }
+.photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-thumb.active { border-color: #3ddc84; }
+.photo-tag { position: absolute; left: 4px; bottom: 4px; background: rgba(0,0,0,.65); color: #3ddc84; font-size: 0.7rem; padding: 1px 6px; border-radius: 6px; }
+.photo-del { position: absolute; right: 4px; top: 4px; width: 22px; height: 22px; border-radius: 50%; border: none; background: rgba(0,0,0,.65); color: #fff; cursor: pointer; line-height: 1; }
+.photo-cam, .photo-review { display: grid; grid-template-columns: minmax(280px, 520px) 1fr; gap: 1.5rem; align-items: start; }
+.photo-video { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 14px; overflow: hidden; }
+.photo-video video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: block; }
+.photo-oval { position: absolute; left: 50%; top: 50%; width: 36%; height: 78%; transform: translate(-50%, -50%); border: 2px dashed rgba(255,255,255,.55); border-radius: 50%; pointer-events: none; }
+.photo-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .25s; }
+.photo-flash.on { opacity: .8; transition: none; }
+.photo-side { min-width: 0; }
+.photo-status { font-size: 1.05rem; margin: 0 0 0.8rem; min-height: 2.6em; }
+.photo-checks { list-style: none; margin: 0 0 0.8rem; padding: 0; display: grid; gap: 0.35rem; }
+.photo-checks li { display: flex; align-items: center; gap: 0.6rem; color: var(--muted); font-size: 0.95rem; }
+.photo-checks .dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border); flex: none; }
+.photo-checks li.ok { color: inherit; }
+.photo-checks li.ok .dot { background: #3ddc84; border-color: #3ddc84; }
+.photo-checks li.no .dot { border-color: #ffb347; }
+.photo-hint { color: var(--muted); font-size: 0.9rem; margin: 0.4rem 0 1rem; }
+.photo-preview { background: #000; border-radius: 14px; overflow: hidden; aspect-ratio: 1; }
+.photo-preview img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.photo-none { height: 100%; display: grid; place-items: center; color: var(--muted); }
+.photo-verdict { font-size: 1.15rem; margin: 0 0 0.6rem; }
+.photo-verdict.good { color: #3ddc84; }
+.photo-verdict.usable { color: #ffb347; }
+.photo-verdict.bad { color: #ff7a6b; }
+.photo-issues { margin: 0 0 0.8rem; padding-left: 1.2rem; display: grid; gap: 0.4rem; }
+.photo-issues li.bad { color: #ff9a8d; }
+.photo-issues li.warn { color: #ffcf85; }
+@media (max-width: 900px) { .photo-options, .photo-cam, .photo-review { grid-template-columns: 1fr; } }

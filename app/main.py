@@ -132,125 +132,10 @@ class CaptureBody(BaseModel):
     section: str
 
 
-class ScanFramesBody(BaseModel):
-    canonical_name: str
-    frames: list[dict]
-
-
 class VoiceBody(BaseModel):
     canonical_name: str
     audio_base64: str
     label: str = "Voice sample"
-
-
-class SkinAtlasBody(BaseModel):
-    canonical_name: str
-    atlas_base64: str
-    layout: dict
-
-
-@app.post("/api/capture/skin-atlas")
-def api_skin_atlas(body: SkinAtlasBody) -> dict:
-    return capture.save_skin_atlas(body.canonical_name, body.atlas_base64, body.layout)
-
-
-class StitchBody(BaseModel):
-    canonical_name: str
-    tone: list[float] | None = None
-
-
-@app.post("/api/capture/stitch-skin")
-def api_stitch_skin(body: StitchBody) -> dict:
-    """Blend the saved scan photos into one seamless skin texture."""
-    try:
-        from app import skin_stitch
-
-        return skin_stitch.stitch(body.canonical_name, body.tone)
-    except Exception as exc:  # surface to the page instead of a hang
-        return {"status": "error", "message": f"{type(exc).__name__}: {exc}"}
-
-
-class StitchStartBody(BaseModel):
-    canonical_name: str
-    layout: dict
-
-
-class StitchAddBody(BaseModel):
-    canonical_name: str
-    image_base64: str
-    landmarks: list[list[float]]
-
-
-class StitchFinishBody(BaseModel):
-    canonical_name: str
-    tone: list[float] | None = None
-
-
-def _scan_dir(name: str):
-    from app.storage import media_dir
-
-    return media_dir(name) / "scan"
-
-
-@app.post("/api/stitch/start")
-def api_stitch_start(body: StitchStartBody) -> dict:
-    """Begin a live skin-stitching session for this scan (layout = mesh points + triangles from the calibration frame)."""
-    import json as _json
-
-    from app import skin_live
-
-    d = _scan_dir(body.canonical_name)
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "skin_atlas.json").write_text(_json.dumps(body.layout), encoding="utf-8")  # also used by the 3D head builder
-    return skin_live.start(body.canonical_name, body.layout)
-
-
-@app.post("/api/stitch/add")
-def api_stitch_add(body: StitchAddBody) -> dict:
-    import base64 as _b64
-
-    from app import skin_live
-
-    raw = _b64.b64decode(body.image_base64.split(",", 1)[-1])
-    return skin_live.add(body.canonical_name, raw, body.landmarks)
-
-
-@app.get("/api/stitch/preview")
-def api_stitch_preview(canonical_name: str, tone: str = "") -> Response:
-    from app import skin_live
-
-    try:
-        tg = [float(x) for x in tone.split(",")] if tone else None
-    except ValueError:
-        tg = None
-    got = skin_live.preview(canonical_name, tg)
-    if got is None:
-        return Response(status_code=404)
-    import base64 as _b64
-
-    jpeg, version, cov, tri = got
-    return Response(content=jpeg, media_type="image/jpeg",
-                    headers={"X-Version": str(version), "X-Coverage": f"{cov:.4f}", "X-TriCov": _b64.b64encode(tri).decode(),
-                             "Cache-Control": "no-store"})
-
-
-@app.post("/api/stitch/finish")
-def api_stitch_finish(body: StitchFinishBody) -> dict:
-    from app import skin_live
-
-    out = skin_live.finish(body.canonical_name, _scan_dir(body.canonical_name), body.tone)
-    if out.get("status") == "ok":
-        out["preview_url"] = walkthrough.media_url(str(_scan_dir(body.canonical_name) / "skin_stitched_preview.jpg"))
-        out["url"] = walkthrough.media_url(str(_scan_dir(body.canonical_name) / "skin_stitched.png"))
-    return out
-
-
-@app.get("/api/stitch/status")
-def api_stitch_status(canonical_name: str) -> dict:
-    from app import skin_live
-
-    s = skin_live.SESSIONS.get(canonical_name)
-    return {"hires": s.hires if s else "none", "photos": s.live.photos if s else 0}
 
 
 class OtherBody(BaseModel):
@@ -340,14 +225,44 @@ def api_capture_stub(body: CaptureBody) -> dict:
     return walkthrough.run_capture_stub(body.canonical_name, body.section)
 
 
-@app.post("/api/capture/scan-frames")
-def api_scan_frames(body: ScanFramesBody) -> dict:
-    return capture.ingest_scan_frames(body.canonical_name, body.frames)
+class PhotoCheckBody(BaseModel):
+    images: list[str]
 
 
-@app.post("/api/capture/skip-scan")
-def api_skip_scan(body: SkipBody) -> dict:
-    return capture.skip_scan(body.canonical_name)
+class PhotoSaveBody(BaseModel):
+    canonical_name: str
+    image: str
+
+
+class PhotoNameBody(BaseModel):
+    canonical_name: str
+    name: str
+
+
+@app.post("/api/photo/check")
+def api_photo_check(body: PhotoCheckBody) -> dict:
+    """Find the face in an upload (or the best of several webcam snaps), level, centre, zoom and crop it, and say if it is good."""
+    return capture.check_photos(body.images)
+
+
+@app.post("/api/photo/save")
+def api_photo_save(body: PhotoSaveBody) -> dict:
+    return capture.save_photo(body.canonical_name, body.image)
+
+
+@app.get("/api/photo/list")
+def api_photo_list(canonical_name: str) -> dict:
+    return capture.photos(canonical_name)
+
+
+@app.post("/api/photo/select")
+def api_photo_select(body: PhotoNameBody) -> dict:
+    return capture.select_photo(body.canonical_name, body.name)
+
+
+@app.post("/api/photo/delete")
+def api_photo_delete(body: PhotoNameBody) -> dict:
+    return capture.delete_photo(body.canonical_name, body.name)
 
 
 @app.post("/api/capture/voice")
@@ -358,11 +273,6 @@ def api_voice(body: VoiceBody) -> dict:
 @app.post("/api/capture/other")
 def api_other(body: OtherBody) -> dict:
     return capture.ingest_other(body.canonical_name, body.display_name, body.notes)
-
-
-@app.post("/api/capture/body-frames")
-def api_body_frames(body: ScanFramesBody) -> dict:
-    return capture.ingest_body_frames(body.canonical_name, body.frames)
 
 
 class ReplyDoneBody(BaseModel):

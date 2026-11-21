@@ -65,80 +65,129 @@ def _angle_index_from_asset(asset: ScanAsset) -> int | None:
         return None
 
 
-def ingest_scan_frames(canonical_name: str, frames: list[dict]) -> dict:
+def _decode_image(b64: str):
+    import cv2
+    import numpy as np
+
+    raw, _mime = decode_data_url(b64)
+    img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("That file is not a picture the app can read.")
+    return img
+
+
+def _data_url(img, quality: int = 92) -> str:
+    import cv2
+
+    ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()
+
+
+def check_photos(images: list[str]) -> dict:
+    """Analyze one uploaded photo, or several webcam snaps (the best one wins). Nothing is saved. Returns the verdict, plain-language
+    reasons, and the prepared (levelled, centred, zoomed, cropped) picture as a data URL."""
+    from app import photo_prep
+
     try:
+        imgs = [_decode_image(b) for b in images if b]
+        if not imgs:
+            return {"status": "error", "message": "No picture was received."}
+        i, r = photo_prep.best_of(imgs)
+        return {
+            "status": "ok", "verdict": r["verdict"], "ok": r["ok"], "score": r["score"], "issues": r["issues"], "face": r["face"],
+            "picked": i, "count": len(imgs), "image": _data_url(r["crop"]) if r["crop"] is not None else None,
+        }
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def photos(canonical_name: str) -> dict:
+    """The person's saved face photos, and which one the avatar is made from."""
+    import json
+
+    from app.photoreal import cinematic_dir
+    from app.profile_logic import face_assets
+    from app.walkthrough import media_url
+
+    profile = get_working_profile(canonical_name)
+    pinned = None
+    try:
+        pinned = json.loads((cinematic_dir(canonical_name) / "options.json").read_text(encoding="utf-8")).get("source_photo")
+    except Exception:
+        pass
+    rows = [{"id": a.id, "name": Path(a.path).name, "url": media_url(a.path), "score": round(a.quality_score * 100), "active": Path(a.path).name == pinned}
+            for a in face_assets(profile) if Path(a.path).exists()]
+    if rows and not any(r["active"] for r in rows):
+        rows[-1]["active"] = True  # nothing pinned: the newest one is used
+    return {"status": "ok", "photos": rows, "profile": profile_summary(profile)}
+
+
+def _pin(canonical_name: str, filename: str) -> None:
+    import json
+
+    from app.photoreal import cinematic_dir, invalidate
+
+    invalidate(canonical_name)  # everything made from the old picture goes (and its pin)
+    o = cinematic_dir(canonical_name) / "options.json"
+    try:
+        opts = json.loads(o.read_text(encoding="utf-8"))
+    except Exception:
+        opts = {}
+    opts["source_photo"] = filename
+    o.parent.mkdir(parents=True, exist_ok=True)
+    o.write_text(json.dumps(opts, indent=1), encoding="utf-8")
+
+
+def save_photo(canonical_name: str, image: str) -> dict:
+    """Keep a prepared photo (as returned by check_photos) as one of the person's faces, and make it the one the avatar uses."""
+    from app import photo_prep
+
+    try:
+        img = _decode_image(image)
+        r = photo_prep.analyze(img)
+        if not r["ok"]:
+            return {"status": "error", "message": r["issues"][0]["text"] if r["issues"] else "That photo cannot be used."}
         profile = get_working_profile(canonical_name)
-        scan_dir = media_dir(canonical_name) / "scan"
-        scan_dir.mkdir(parents=True, exist_ok=True)
+        d = media_dir(canonical_name) / "scan"
+        d.mkdir(parents=True, exist_ok=True)
+        import cv2
 
-        if not frames:
-            return {"status": "error", "message": "No frames to save."}
-
-        def is_body(a: ScanAsset) -> bool:
-            return "body" in (a.caption or "").lower() or Path(a.path).name.startswith("body_")
-
-        body_keep = [a for a in profile.scan_assets if is_body(a)]
-        merged: dict[int, ScanAsset] = {}
-        for a in profile.scan_assets:
-            if is_body(a):
-                continue
-            idx = _angle_index_from_asset(a)
-            if idx is not None:
-                merged[idx] = a
-
-        # A full scan (many wedges) REPLACES the old face scan — merging by quality kept stale
-        # photos from earlier, lower-resolution scans alive (their scores were higher).
-        if len([f for f in frames if (f.get("image_base64") or "")]) >= 16:
-            merged = {}
-
-        new_count = 0
-        for item in frames:
-            b64 = item.get("image_base64") or ""
-            if not b64 or len(b64) < 50:
-                continue
-            try:
-                raw, mime = decode_data_url(b64)
-            except (ValueError, TypeError):
-                continue
-            if not raw:
-                continue
-            angle_idx = int(item.get("angle_index", new_count))
-            ext = extension_for_mime(mime)
-            fname = f"angle_{angle_idx}_{uuid4().hex[:8]}.{ext}"
-            path = scan_dir / fname
-            path.write_bytes(raw)
-            quality = float(item.get("quality_score", 0.9))
-            new_asset = ScanAsset(
-                id=f"scan-{uuid4().hex[:8]}",
-                path=str(path),
-                caption=item.get("caption", f"Angle {angle_idx}"),
-                quality_score=quality,
-                yaw_deg=item.get("yaw_deg"),
-                pitch_deg=item.get("pitch_deg"),
-                tracked=bool(item.get("tracked", True)),
-            )
-            new_count += 1
-            prev = merged.get(angle_idx)
-            if prev is None or new_asset.quality_score > prev.quality_score:
-                merged[angle_idx] = new_asset
-
-        if not merged:
-            return {"status": "error", "message": "Could not decode any scan images."}
-
-        ordered = [merged[k] for k in sorted(merged.keys())]
-        profile.scan_assets = body_keep + ordered
-
+        name = f"photo_{uuid4().hex[:8]}.jpg"
+        cv2.imwrite(str(d / name), r["crop"], [cv2.IMWRITE_JPEG_QUALITY, 95])
+        profile.scan_assets.append(ScanAsset(id=f"photo-{uuid4().hex[:8]}", path=str(d / name), caption="Photo", quality_score=float(r["score"]) / 100.0, tracked=True))
+        profile.scan_skipped = False
         profile = reconcile_profile(profile)
+        profile.touch()
         save_draft(profile)
-        try:  # a rescan means a new photo: everything made from the old one is purged
-            from app.photoreal import invalidate
-
-            invalidate(canonical_name)
-        except Exception:
-            pass
-        return {"status": "ok", "profile": profile_summary(profile)}
+        _pin(canonical_name, name)
+        return {"status": "ok", "profile": profile_summary(profile), "photo": name}
     except Exception as exc:
         return {"status": "error", "message": f"Save failed: {exc}"}
+
+
+def select_photo(canonical_name: str, name: str) -> dict:
+    d = media_dir(canonical_name) / "scan"
+    if not (d / Path(name).name).exists():
+        return {"status": "error", "message": "That photo is gone."}
+    _pin(canonical_name, Path(name).name)
+    return photos(canonical_name)
+
+
+def delete_photo(canonical_name: str, name: str) -> dict:
+    profile = get_working_profile(canonical_name)
+    keep = [a for a in profile.scan_assets if Path(a.path).name != Path(name).name]
+    if len(keep) == len(profile.scan_assets):
+        return {"status": "error", "message": "That photo is not in this profile."}
+    (media_dir(canonical_name) / "scan" / Path(name).name).unlink(missing_ok=True)
+    profile.scan_assets = keep
+    profile = reconcile_profile(profile)
+    profile.touch()
+    save_draft(profile)
+    cur = photos(canonical_name)
+    if cur["photos"]:
+        act = next((r for r in cur["photos"] if r["active"]), cur["photos"][-1])
+        _pin(canonical_name, act["name"])  # the avatar might have been made from the deleted one
+    return {"status": "ok", "profile": profile_summary(profile), **photos(canonical_name)}
 
 
 def ingest_voice(canonical_name: str, audio_base64: str, label: str) -> dict:
@@ -167,41 +216,6 @@ def ingest_voice(canonical_name: str, audio_base64: str, label: str) -> dict:
     return {"status": "ok", "profile": profile_summary(profile)}
 
 
-def ingest_body_frames(canonical_name: str, frames: list[dict]) -> dict:
-    profile = get_working_profile(canonical_name)
-    scan_dir = media_dir(canonical_name) / "scan"
-    scan_dir.mkdir(parents=True, exist_ok=True)
-
-    for item in frames:
-        raw, mime = decode_data_url(item["image_base64"])
-        ext = extension_for_mime(mime)
-        fname = f"body_{item.get('angle_index', 0)}_{uuid4().hex[:8]}.{ext}"
-        path = scan_dir / fname
-        path.write_bytes(raw)
-        profile.scan_assets.append(
-            ScanAsset(
-                id=f"scan-{uuid4().hex[:8]}",
-                path=str(path),
-                caption=item.get("caption", "Body"),
-                quality_score=float(item.get("quality_score", 0.85)),
-            )
-        )
-
-    profile.touch()
-    save_draft(profile)
-    return {"status": "ok", "profile": profile_summary(profile)}
-
-
-def skip_scan(canonical_name: str) -> dict:
-    """The person has no face to scan (a cartoon character such as Astro Boy, a pet, a voice-only avatar)."""
-    profile = get_working_profile(canonical_name)
-    profile.scan_skipped = True
-    profile = reconcile_profile(profile)
-    profile.touch()
-    save_draft(profile)
-    return {"status": "ok", "profile": profile_summary(profile)}
-
-
 def ingest_other(canonical_name: str, display_name: str, notes: str) -> dict:
     profile = get_working_profile(canonical_name)
     profile.other.display_name = display_name.strip() or profile.display_name
@@ -210,19 +224,3 @@ def ingest_other(canonical_name: str, display_name: str, notes: str) -> dict:
     profile.touch()
     save_draft(profile)
     return {"status": "ok", "profile": profile_summary(profile)}
-
-def save_skin_atlas(canonical_name: str, atlas_base64: str, layout: dict) -> dict:
-    """Store the stitched skin map (PNG) and its mesh layout so the 3D head builder can use them."""
-    try:
-        import json as _json
-
-        raw, _mime = decode_data_url(atlas_base64)
-        if not raw:
-            return {"status": "error", "message": "Empty atlas."}
-        scan_dir = media_dir(canonical_name) / "scan"
-        scan_dir.mkdir(parents=True, exist_ok=True)
-        (scan_dir / "skin_atlas.png").write_bytes(raw)
-        (scan_dir / "skin_atlas.json").write_text(_json.dumps(layout), encoding="utf-8")
-        return {"status": "ok", "bytes": len(raw)}
-    except Exception as exc:
-        return {"status": "error", "message": f"Atlas save failed: {exc}"}

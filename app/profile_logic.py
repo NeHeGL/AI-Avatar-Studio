@@ -4,7 +4,7 @@ from pathlib import Path
 
 from app.models import ProfileSection, ScanAsset, UserProfile
 
-MIN_FACE_ANGLES = 4
+MIN_FACE_ANGLES = 1  # one good photo of the face
 
 
 def pick_avatar_face(assets: list[ScanAsset]) -> ScanAsset | None:

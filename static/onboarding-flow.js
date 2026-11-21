@@ -46,31 +46,13 @@ export async function runSetupPipeline(ctx, opts = {}) {
   const needVoice = opts.needVoice ?? sectionNeeds(prof, "voice");
   const skipFinish = opts.skipFinishCard === true;
 
-  async function faceIntro() {
-    setPhaseLabels(phaseLabel, statusHint, "", "");
-    transition(
-      root,
-      `
-      <section class="step-card step-card--center">
-        <h2 class="step-title">We'll scan your face</h2>
-        <p class="step-copy">Move your head slowly around the circle so we can see you from every angle — like Face&nbsp;ID.</p>
-        <div class="step-actions step-actions--solo">
-          <button type="button" class="btn-primary" id="ob-continue">Continue</button>
-        </div>
-      </section>`
-    );
-    return waitClick("ob-continue");
-  }
-
   if (needFace) {
-    // The face scan is required: if it is cancelled, go back to the start of it (the header's Change profile button leaves).
-    const { runFaceScan } = await import("/static/orbit-scan.js?v=59");
-    let faceResult = null;
-    while (!faceResult?.profile) {
-      await faceIntro();
-      faceResult = await runFaceScan(root, state.canonicalName, api);
-    }
-    state.profile = faceResult.profile;
+    // The photo is required: if the step is cancelled, it starts again (the header's Change profile button leaves).
+    setPhaseLabels(phaseLabel, statusHint, "", "");
+    const { runPhotoStep } = await import("/static/photo-capture.js?v=1");
+    let photo = null;
+    while (!photo?.profile) photo = await runPhotoStep(root, state.canonicalName, api);
+    state.profile = photo.profile;
   }
 
   if (needVoice) {

@@ -21,7 +21,7 @@ from app.storage import (
     save_profile,
 )
 
-MIN_SCAN_QUALITY = 0.5
+MIN_SCAN_QUALITY = 0.2  # photos are checked when they are added; a "usable" one can score under 50
 MIN_VOICE_QUALITY = 0.6
 
 
