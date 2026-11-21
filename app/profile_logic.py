@@ -40,7 +40,42 @@ def face_assets(profile: UserProfile) -> list:
     ]
 
 
+_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
+_AUDIO_EXT = {".wav", ".webm", ".ogg", ".mp3", ".m4a", ".flac"}
+
+
+def sync_with_disk(profile: UserProfile) -> UserProfile:
+    """Make the profile's lists of photos and recordings match the files that are really in the person's folders, so every screen
+    shows the same counts: a photo or clip that was deleted from disk is dropped, and one that was put in the folder by hand (or
+    left out of the record by an earlier bug) is added. The files are the truth."""
+    from app.models import VoicePhase
+    from app.storage import media_dir, voice_dir
+
+    name = profile.canonical_name
+    try:
+        sd = media_dir(name) / "scan"
+        have = {Path(a.path).name: a for a in profile.scan_assets if Path(a.path).exists()}
+        if sd.is_dir():
+            for f in sorted(sd.iterdir()):
+                if f.is_file() and f.suffix.lower() in _IMAGE_EXT and not f.name.startswith(("skin_", "body_")) and f.name not in have:
+                    have[f.name] = ScanAsset(id=f"photo-{f.stem[-8:]}", path=str(f), caption="Photo", quality_score=0.7, tracked=True)
+        body = [a for a in profile.scan_assets if "body" in (a.caption or "").lower() and Path(a.path).exists()]
+        profile.scan_assets = list(have.values()) + [a for a in body if Path(a.path).name not in have]
+
+        vd = voice_dir(name)
+        known = {Path(v.path).name: v for v in profile.voice_phases if v.path and Path(v.path).exists()}
+        if vd.is_dir():
+            for f in sorted(vd.iterdir()):
+                if f.is_file() and not f.name.startswith("_") and f.suffix.lower() in _AUDIO_EXT and f.name not in known:
+                    known[f.name] = VoicePhase(id=f"voice-{f.stem[:8]}", label="Voice recording", path=str(f), duration_sec=0.0, quality_score=0.85)
+        profile.voice_phases = list(known.values()) + [v for v in profile.voice_phases if not v.path]  # placeholders without a file stay as they were
+    except Exception:
+        pass  # never let a folder problem break loading a profile
+    return profile
+
+
 def reconcile_profile(profile: UserProfile) -> UserProfile:
+    sync_with_disk(profile)
     faces = face_assets(profile)
     if len(faces) >= MIN_FACE_ANGLES:
         profile.scan_skipped = False          # a real scan replaces an earlier "no face" choice
