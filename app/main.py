@@ -271,6 +271,21 @@ def api_voice(body: VoiceBody) -> dict:
     return capture.ingest_voice(body.canonical_name, body.audio_base64, body.label)
 
 
+class VoiceNameBody(BaseModel):
+    canonical_name: str
+    name: str
+
+
+@app.get("/api/voice/list")
+def api_voice_list(canonical_name: str) -> dict:
+    return capture.voice_list(canonical_name)
+
+
+@app.post("/api/voice/delete")
+def api_voice_delete(body: VoiceNameBody) -> dict:
+    return capture.voice_delete(body.canonical_name, body.name)
+
+
 @app.post("/api/capture/other")
 def api_other(body: OtherBody) -> dict:
     return capture.ingest_other(body.canonical_name, body.display_name, body.notes, body.clear)

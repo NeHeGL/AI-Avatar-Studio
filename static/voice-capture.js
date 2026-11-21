@@ -168,3 +168,63 @@ export async function runVoiceCapture(root, canonicalName, api) {
     };
   });
 }
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/** The Voice screen: every recording for this person with a player and a delete button, and a way to record another. */
+export async function runVoiceStep(root, canonicalName, api) {
+  const hb = document.getElementById("logout-btn");
+  let profile = null;
+  if (hb) hb.style.display = "none"; // this screen has its own Done
+  return new Promise((resolve) => {
+    const finish = () => {
+      if (hb) hb.style.display = "";
+      resolve(profile ? { profile } : null);
+    };
+    async function show() {
+      let data = { clips: [] };
+      try {
+        data = await (await fetch(`/api/voice/list?canonical_name=${encodeURIComponent(canonicalName)}`)).json();
+        profile = data.profile || profile;
+      } catch { /* empty list */ }
+      const clips = data.clips || [];
+      const wrap = document.createElement("section");
+      wrap.className = "card voice-card";
+      wrap.innerHTML = `
+        <h2>Voice Scan</h2>
+        <p class="voice-note">These recordings build your avatar's voice. The program picks the clearest speech from all of them. You can also drop audio files into this profile's voice folder.</p>
+        <div class="voice-clips">${
+          clips.length
+            ? clips
+                .map(
+                  (c) => `<div class="voice-clip"><div class="voice-clip-name">${esc(c.locked ? "Locked voice (reference.wav)" : c.name)}${c.seconds ? ` <span>${c.seconds}s</span>` : ""}</div>
+                  <audio controls preload="none" src="${esc(c.url)}"></audio>
+                  <button type="button" class="photo-del voice-del" data-name="${esc(c.name)}" title="Delete this recording"></button></div>`
+                )
+                .join("")
+            : '<p class="voice-empty">No recordings yet.</p>'
+        }</div>
+        <div class="step-actions step-actions--row">
+          <button type="button" class="btn-ghost" id="vs-done">Done</button>
+          <button type="button" class="btn-primary" id="vs-record">Record another</button>
+        </div>`;
+      root.innerHTML = "";
+      root.appendChild(wrap);
+      wrap.querySelector("#vs-done").onclick = finish;
+      wrap.querySelector("#vs-record").onclick = async () => {
+        const r = await runVoiceCapture(root, canonicalName, api);
+        if (r?.profile) profile = r.profile;
+        show();
+      };
+      wrap.querySelectorAll(".voice-del").forEach((b) => {
+        b.onclick = async () => {
+          if (!confirm("Delete this recording?")) return;
+          const out = await api("/api/voice/delete", { canonical_name: canonicalName, name: b.dataset.name });
+          if (out.profile) profile = out.profile;
+          show();
+        };
+      });
+    }
+    show();
+  });
+}

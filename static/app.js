@@ -119,10 +119,10 @@ function renderSectionsList(profile) {
   const stored = (n, one, many) => (n ? plural(n, one, many) : "None");
   ul.classList.add("stats-grid");
   ul.innerHTML = `
-    <li class="stats-head"><span>Step</span><span>Records stored</span><span>Contains data</span></li>
-    <li><span>Photo</span><span>${stored(s.scan.count, "photo", "photos")}</span>${badgeHtml(bs)}</li>
-    <li><span>Voice Scan</span><span>${stored(s.voice.count, "recording", "recordings")}</span>${badgeHtml(bv)}</li>
-    <li><span>Knowledge</span><span>${stored(s.other.words || 0, "word", "words")}</span>${badgeHtml(bo)}</li>
+    <li class="stats-head"><span>Step</span><span>Records Stored</span><span>Contains Data</span></li>
+    <li class="row-link" data-section="scan" role="button" tabindex="0" title="See and change your photos"><span>Photo</span><span>${stored(s.scan.count, "photo", "photos")}</span>${badgeHtml(bs)}</li>
+    <li class="row-link" data-section="voice" role="button" tabindex="0" title="Listen to and change your recordings"><span>Voice Scan</span><span>${stored(s.voice.count, "recording", "recordings")}</span>${badgeHtml(bv)}</li>
+    <li class="row-link" data-section="other" role="button" tabindex="0" title="Read and change your knowledge"><span>Knowledge</span><span>${stored(s.other.words || 0, "word", "words")}</span>${badgeHtml(bo)}</li>
   `;
 }
 
@@ -213,17 +213,20 @@ function renderProfileHome() {
     <section class="card home-card">
       <h2>${escapeHtml(name)}</h2>
       <ul class="sections-list" id="sections-overview"></ul>
-      <p class="home-hint">Choose what you'd like to do.</p>
+      <p class="home-hint">Click a row to see or change it.</p>
       <div class="home-actions">
         <button type="button" class="btn-primary" id="btn-preview">View Your Avatar</button>
-        <button type="button" class="btn-ghost" id="btn-update">Update Your Avatar</button>
         <button type="button" class="btn-ghost btn-danger" id="btn-delete">Delete and Start Fresh</button>
       </div>
     </section>
   `;
   renderSectionsList(p);
   document.getElementById("btn-preview").onclick = () => previewAvatar();
-  document.getElementById("btn-update").onclick = () => renderUpdateAvatarScreen();
+  document.querySelectorAll("#sections-overview .row-link").forEach((li) => {
+    const go = () => runUpdateSection(li.dataset.section);
+    li.onclick = go;
+    li.onkeydown = (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), go());
+  });
   document.getElementById("btn-delete").onclick = () => deleteExistingProfile();
 }
 
@@ -243,38 +246,6 @@ async function previewAvatar() {
   renderAvatar(result);
 }
 
-function renderUpdateAvatarScreen() {
-  setPhase("", ""); // the card heading says it all
-  const p = state.profile;
-  const s = p.sections;
-  root.innerHTML = `
-    <section class="card">
-      <h2>Update Your Avatar</h2>
-      <div class="update-menu">
-        <button type="button" class="update-menu-item" id="upd-scan">
-          <span class="update-menu-title">Photo</span>
-          ${badgeHtml(sectionBadge("scan", s))}
-        </button>
-        <button type="button" class="update-menu-item" id="upd-voice">
-          <span class="update-menu-title">Voice Scan</span>
-          ${badgeHtml(sectionBadge("voice", s))}
-        </button>
-        <button type="button" class="update-menu-item" id="upd-other">
-          <span class="update-menu-title">Knowledge</span>
-          ${badgeHtml(sectionBadge("other", s))}
-        </button>
-      </div>
-      <div class="btn-row" style="margin-top:1.25rem;flex-direction:column;">
-        <button type="button" class="btn-ghost" id="upd-back">Back</button>
-      </div>
-    </section>
-  `;
-  document.getElementById("upd-scan").onclick = () => runUpdateSection("scan");
-  document.getElementById("upd-voice").onclick = () => runUpdateSection("voice");
-  document.getElementById("upd-other").onclick = () => runUpdateSection("other");
-  document.getElementById("upd-back").onclick = () => renderProfileHome();
-}
-
 async function runUpdateSection(section) {
   setCinematicMode(true);
   if (section === "scan") {
@@ -282,17 +253,17 @@ async function runUpdateSection(section) {
     const result = await runPhotoStep(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if (section === "voice") {
-    const { runVoiceCapture } = await import("/static/voice-capture.js?v=6");
-    const result = await runVoiceCapture(root, state.canonicalName, api);
+    const { runVoiceStep } = await import("/static/voice-capture.js?v=7");
+    const result = await runVoiceStep(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if ((await openOtherEditor()) === false) {
     setCinematicMode(false); // cancelled: nothing was changed, so nothing is saved
-    renderUpdateAvatarScreen();
+    renderProfileHome();
     return;
   }
   await saveNewProfile(false);
   setCinematicMode(false);
-  renderUpdateAvatarScreen();
+  renderProfileHome();
 }
 
 /** Deleting a profile takes three separate confirmations: read the warning, type the profile's name, then wait out a short countdown. */
@@ -677,7 +648,7 @@ async function runScanFlow() {
 }
 
 async function runVoiceFlow() {
-  const { runVoiceCapture } = await import("/static/voice-capture.js?v=6");
+  const { runVoiceCapture } = await import("/static/voice-capture.js?v=7");
   const result = await runVoiceCapture(root, state.canonicalName, api);
   if (result?.profile) {
     state.profile = result.profile;
@@ -761,7 +732,7 @@ import {
   runSetupPipeline,
   setCinematicMode,
   setPhaseLabels,
-} from "/static/onboarding-flow.js?v=21";
+} from "/static/onboarding-flow.js?v=22";
 
 /** Startup screen: the chat brain, ears, speech engine and video animation load once, here, so everything is ready when a person is picked. */
 const STARTUP_ROWS = [

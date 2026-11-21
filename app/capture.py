@@ -236,3 +236,53 @@ def ingest_other(canonical_name: str, display_name: str, notes: str, force_clear
     profile.touch()
     save_draft(profile)
     return {"status": "ok", "profile": profile_summary(profile)}
+
+
+_AUDIO_EXT = {".wav", ".webm", ".ogg", ".mp3", ".m4a", ".flac"}
+
+
+def _seconds(path: Path) -> float | None:
+    try:
+        import soundfile as sf
+
+        i = sf.info(str(path))
+        return round(i.duration, 1)
+    except Exception:
+        pass
+    try:
+        import av
+
+        with av.open(str(path)) as c:
+            if c.duration:
+                return round(c.duration / 1_000_000, 1)
+    except Exception:
+        pass
+    return None
+
+
+def voice_list(canonical_name: str) -> dict:
+    """Every audio clip in the person's voice folder (recorded in the app or dropped in), newest first."""
+    from app.walkthrough import media_url
+
+    d = voice_dir(canonical_name)
+    rows = []
+    if d.is_dir():
+        for f in sorted(d.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if f.is_file() and not f.name.startswith("_") and f.suffix.lower() in _AUDIO_EXT:
+                rows.append({"name": f.name, "url": media_url(str(f)), "seconds": _seconds(f), "locked": f.name.lower() == "reference.wav"})
+    return {"status": "ok", "clips": rows, "profile": profile_summary(get_working_profile(canonical_name))}
+
+
+def voice_delete(canonical_name: str, name: str) -> dict:
+    d = voice_dir(canonical_name)
+    f = d / Path(name).name
+    if not f.is_file() or f.name.startswith("_"):
+        return {"status": "error", "message": "That clip is not in this profile."}
+    f.unlink(missing_ok=True)
+    profile = get_working_profile(canonical_name)
+    profile.voice_phases = [v for v in profile.voice_phases if Path(v.path).name != f.name]
+    profile = reconcile_profile(profile)
+    profile.touch()
+    save_draft(profile)
+    (d / "_ref.json").unlink(missing_ok=True)  # the clean reference is rebuilt from what is left
+    return voice_list(canonical_name)
