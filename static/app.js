@@ -281,7 +281,7 @@ function renderUpdateAvatarScreen() {
 async function runUpdateSection(section) {
   setCinematicMode(true);
   if (section === "scan") {
-    const { runFaceScan } = await import("/static/orbit-scan.js?v=46");
+    const { runFaceScan } = await import("/static/orbit-scan.js?v=47");
     const result = await runFaceScan(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if (section === "voice") {
@@ -663,7 +663,7 @@ function renderNewUserFlow() {
 }
 
 async function runScanFlow() {
-  const { runFaceScan } = await import("/static/orbit-scan.js?v=45");
+  const { runFaceScan } = await import("/static/orbit-scan.js?v=47");
   const result = await runFaceScan(root, state.canonicalName, api);
   if (result?.profile) {
     state.profile = result.profile;

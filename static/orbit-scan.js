@@ -128,6 +128,14 @@ export async function runFaceScan(root, canonicalName, api) {
   let lastPaintAt = 0;
   let lastDrawAt = 0;
   let pose = { yaw: 0, pitch: 0 };
+  // Dead-ahead is found from the face itself: the nose sits midway between the two cheek edges only when you face the camera,
+  // whatever the camera's position. Frames like that set the centre; the first frames are not assumed to be straight.
+  const frontalYaws = [];
+  const symOf = (lm) => {
+    const l = lm[234], r = lm[454], n = lm[1];
+    const w = Math.abs(r.x - l.x);
+    return w > 0.02 ? (n.x - (l.x + r.x) / 2) / w : 1;
+  };
   let recenter = null; // frames still to average after the Re-center button
   const baseline = { yaw: 0, pitch: 0, n: 0, sy: 0, sp: 0, ready: false };
   const slots = Array(CELLS.length).fill(null);
@@ -1367,6 +1375,12 @@ export async function runFaceScan(root, canonicalName, api) {
         drawModel();
         return;
       }
+      if (Math.abs(symOf(lm)) > 0.05) {
+        baseline.n = 0; baseline.sy = 0; baseline.sp = 0;
+        liveEl.textContent = "Look straight at the camera and hold still…";
+        drawModel();
+        return;
+      }
       baseline.sy += rawYaw;
       baseline.sp += rawPitch;
       baseline.n += 1;
@@ -1385,6 +1399,15 @@ export async function runFaceScan(root, canonicalName, api) {
       return;
     }
 
+    if (Math.abs(symOf(lm)) < 0.03 && Math.abs(rawYaw - baseline.yaw) < 40) {
+      // a frame where you really face the camera: keep the centre tied to the median of the latest such frames
+      frontalYaws.push(rawYaw);
+      if (frontalYaws.length > 40) frontalYaws.shift();
+      if (frontalYaws.length >= 8) {
+        const s = [...frontalYaws].sort((a, b) => a - b);
+        baseline.yaw = s[s.length >> 1];
+      }
+    }
     if (recenter) {
       recenter.sy += rawYaw;
       recenter.sp += rawPitch;
