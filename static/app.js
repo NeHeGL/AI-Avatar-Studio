@@ -253,7 +253,7 @@ async function runUpdateSection(section) {
     const result = await runPhotoStep(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if (section === "voice") {
-    const { runVoiceStep } = await import("/static/voice-capture.js?v=7");
+    const { runVoiceStep } = await import("/static/voice-capture.js?v=8");
     const result = await runVoiceStep(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if ((await openOtherEditor()) === false) {
@@ -648,7 +648,7 @@ async function runScanFlow() {
 }
 
 async function runVoiceFlow() {
-  const { runVoiceCapture } = await import("/static/voice-capture.js?v=7");
+  const { runVoiceCapture } = await import("/static/voice-capture.js?v=8");
   const result = await runVoiceCapture(root, state.canonicalName, api);
   if (result?.profile) {
     state.profile = result.profile;
@@ -732,7 +732,7 @@ import {
   runSetupPipeline,
   setCinematicMode,
   setPhaseLabels,
-} from "/static/onboarding-flow.js?v=22";
+} from "/static/onboarding-flow.js?v=23";
 
 /** Startup screen: the chat brain, ears, speech engine and video animation load once, here, so everything is ready when a person is picked. */
 const STARTUP_ROWS = [

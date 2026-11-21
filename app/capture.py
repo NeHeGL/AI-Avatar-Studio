@@ -65,6 +65,7 @@ def _angle_index_from_asset(asset: ScanAsset) -> int | None:
         return None
 
 
+MAX_CLIPS = 5  # recordings per profile, shown as tiles like the photos
 MAX_PHOTOS = 5  # kept in step with the Photo page: they all fit on one row
 
 
@@ -286,3 +287,65 @@ def voice_delete(canonical_name: str, name: str) -> dict:
     save_draft(profile)
     (d / "_ref.json").unlink(missing_ok=True)  # the clean reference is rebuilt from what is left
     return voice_list(canonical_name)
+
+
+_VOICE_TMP = Path(__file__).resolve().parent.parent / "data" / "tmp_render" / "voice_candidates"
+
+
+def voice_check(audio_base64: str) -> dict:
+    """Analyze one recording (made in the app or uploaded). Nothing is added to the profile yet: the file is held under a token until Save."""
+    from app import voice_prep
+    from app.chat import _load_any_audio
+
+    try:
+        raw, mime = decode_data_url(audio_base64)
+        if not raw:
+            return {"status": "error", "message": "That file is empty."}
+        ext = sniff_audio_ext(raw, extension_for_mime(mime))
+        _VOICE_TMP.mkdir(parents=True, exist_ok=True)
+        for old in _VOICE_TMP.glob("*"):  # candidates older than a day are cleared
+            try:
+                if old.stat().st_mtime < __import__("time").time() - 86400:
+                    old.unlink()
+            except OSError:
+                pass
+        token = uuid4().hex[:12]
+        path = _VOICE_TMP / f"{token}.{ext}"
+        path.write_bytes(raw)
+        try:
+            x, sr = _load_any_audio(path)
+        except Exception:
+            path.unlink(missing_ok=True)
+            return {"status": "error", "message": "That file could not be read as audio. Try a wav, mp3, m4a, ogg or webm file."}
+        r = voice_prep.assess(x, sr)
+        return {"status": "ok", "token": token, "ext": ext, **r}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def voice_save(canonical_name: str, token: str) -> dict:
+    """Add a checked recording to the person's voice folder and profile."""
+    from app import voice_prep
+    from app.chat import _load_any_audio
+
+    src = next(iter(_VOICE_TMP.glob(f"{Path(token).name}.*")), None) if token else None
+    if src is None or not src.exists():
+        return {"status": "error", "message": "That recording is no longer available. Please add it again."}
+    x, sr = _load_any_audio(src)
+    if voice_prep.assess(x, sr)["verdict"] == "bad":
+        return {"status": "error", "message": "That recording cannot be used."}
+    profile = get_working_profile(canonical_name)
+    d = voice_dir(canonical_name)
+    d.mkdir(parents=True, exist_ok=True)
+    if len(voice_list(canonical_name)["clips"]) >= MAX_CLIPS:
+        return {"status": "error", "message": f"{MAX_CLIPS} recordings is the most that can be kept. Delete one to add another."}
+    dest = d / f"{uuid4().hex[:8]}{src.suffix}"
+    src.replace(dest)
+    profile.voice_phases.append(
+        VoicePhase(id=f"voice-{uuid4().hex[:8]}", label="Voice recording", path=str(dest), duration_sec=round(len(x) / sr, 1), quality_score=0.85)
+    )
+    profile = reconcile_profile(profile)
+    profile.touch()
+    save_draft(profile)
+    (d / "_ref.json").unlink(missing_ok=True)  # the clean reference is rebuilt with the new clip included
+    return {"status": "ok", "profile": profile_summary(profile)}

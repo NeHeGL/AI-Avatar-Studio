@@ -271,6 +271,25 @@ def api_voice(body: VoiceBody) -> dict:
     return capture.ingest_voice(body.canonical_name, body.audio_base64, body.label)
 
 
+class VoiceCheckBody(BaseModel):
+    audio_base64: str
+
+
+class VoiceSaveBody(BaseModel):
+    canonical_name: str
+    token: str
+
+
+@app.post("/api/voice/check")
+def api_voice_check(body: VoiceCheckBody) -> dict:
+    return capture.voice_check(body.audio_base64)
+
+
+@app.post("/api/voice/save")
+def api_voice_save(body: VoiceSaveBody) -> dict:
+    return capture.voice_save(body.canonical_name, body.token)
+
+
 class VoiceNameBody(BaseModel):
     canonical_name: str
     name: str

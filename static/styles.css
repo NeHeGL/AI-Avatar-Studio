@@ -1378,3 +1378,14 @@ body .subtitle:empty { display: none; }
 /* the grid headings: same size as the rows, bold, normal case */
 .stats-grid li.stats-head { color: inherit; font-size: 1rem; font-weight: 700; text-transform: none; letter-spacing: 0; padding-bottom: 0.45rem; }
 .stats-grid li.stats-head > :nth-child(2) { color: inherit; }
+
+/* voice tiles: like the photo tiles, a big play button and the length; green while playing */
+.voice-tile { display: grid; place-items: center; align-content: center; gap: 0.35rem; background: radial-gradient(circle at 50% 35%, #26405f, #151b26); text-align: center; }
+.voice-play { width: 54px; height: 54px; border-radius: 50%; background: rgba(255,255,255,.12); position: relative; }
+.voice-play::before { content: ""; position: absolute; left: 21px; top: 15px; border-left: 18px solid #fff; border-top: 12px solid transparent; border-bottom: 12px solid transparent; }
+.voice-tile.playing { border-color: #3ddc84; }
+.voice-tile.playing .voice-play { background: rgba(61,220,132,.25); }
+.voice-tile.playing .voice-play::before { left: 18px; top: 17px; width: 8px; height: 20px; border: none; border-left: 6px solid #3ddc84; border-right: 6px solid #3ddc84; box-sizing: content-box; width: 4px; }
+.voice-tile-title { font-size: 0.95rem; }
+.voice-tile-len { font-size: 0.8rem; color: var(--muted); }
+.voice-review-audio { width: 100%; max-width: 520px; margin: 0.4rem 0 0.2rem; }

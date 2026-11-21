@@ -151,16 +151,14 @@ export async function runVoiceCapture(root, canonicalName, api) {
       btnSave.disabled = true;
       const reader = new FileReader();
       reader.onload = async () => {
-        try {
-          const result = await api("/api/capture/voice", {
-            canonical_name: canonicalName,
-            audio_base64: reader.result,
-            label: "Setup read",
-          });
+        const out = await reviewVoice(root, canonicalName, api, reader.result);
+        if (out) {
           stopAll();
-          resolve(result);
-        } catch (err) {
-          alert("Could not save voice: " + err.message);
+          resolve(out);
+        } else {
+          // back to the recorder to try again
+          root.innerHTML = "";
+          root.appendChild(wrap);
           btnSave.disabled = false;
         }
       };
@@ -171,55 +169,161 @@ export async function runVoiceCapture(root, canonicalName, api) {
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-/** The Voice screen: every recording for this person with a player and a delete button, and a way to record another. */
+/** Check a recording (made in the app or uploaded) and show what the program found, in plain words. Resolves {profile} once it is saved,
+ * or null when the person chooses to try another. */
+export function reviewVoice(root, canonicalName, api, dataUrl) {
+  return new Promise(async (resolve) => {
+    const wrap = document.createElement("section");
+    wrap.className = "card voice-card";
+    wrap.innerHTML = `<h2>Voice Scan</h2><p class="voice-note">Listening to the recording…</p>`;
+    root.innerHTML = "";
+    root.appendChild(wrap);
+    let r;
+    try {
+      r = await api("/api/voice/check", { audio_base64: dataUrl });
+    } catch {
+      r = { status: "error", message: "Could not check the recording." };
+    }
+    if (r.status !== "ok") {
+      wrap.innerHTML = `<h2>Voice Scan</h2><p class="photo-verdict bad">${esc(r.message || "Something went wrong.")}</p>
+        <div class="step-actions step-actions--row"><button type="button" class="btn-primary" id="vr-again">Try another</button></div>`;
+      wrap.querySelector("#vr-again").onclick = () => resolve(null);
+      return;
+    }
+    const head = { good: "This recording sounds good.", usable: "This recording will work, but could be better.", bad: "This recording can't be used." }[r.verdict];
+    wrap.innerHTML = `
+      <h2>Voice Scan</h2>
+      <p class="photo-verdict ${r.verdict}">${head}</p>
+      <audio controls src="${esc(dataUrl)}" class="voice-review-audio"></audio>
+      <p class="photo-hint">${r.seconds} seconds, ${r.speech_seconds} seconds of clear speech.</p>
+      ${r.issues.length ? `<ul class="photo-issues">${r.issues.map((i) => `<li class="${i.level}">${esc(i.text)}</li>`).join("")}</ul>` : ""}
+      <div class="step-actions step-actions--row">
+        <button type="button" class="btn-ghost" id="vr-again">Try another</button>
+        <button type="button" class="btn-primary" id="vr-save" ${r.verdict === "bad" ? "disabled" : ""}>Save</button>
+      </div>`;
+    wrap.querySelector("#vr-again").onclick = () => resolve(null);
+    const save = wrap.querySelector("#vr-save");
+    save.onclick = async () => {
+      save.disabled = true;
+      const out = await api("/api/voice/save", { canonical_name: canonicalName, token: r.token });
+      if (out.status === "ok") resolve(out);
+      else {
+        alert(out.message || "Could not save the recording.");
+        save.disabled = false;
+      }
+    };
+  });
+}
+
+const MAX_CLIPS = 5; // shown as tiles, like the photos
+
+/** The Voice screen, laid out like the Photo screen: your recordings as tiles (click one to play it, x to delete it), then two ways to add
+ * another: record a new one (you read a short passage) or upload an audio file. */
 export async function runVoiceStep(root, canonicalName, api) {
   const hb = document.getElementById("logout-btn");
-  let profile = null;
   if (hb) hb.style.display = "none"; // this screen has its own Done
+  document.body.classList.add("wide-stage");
+  const player = new Audio();
+  let profile = null;
   return new Promise((resolve) => {
     const finish = () => {
+      player.pause();
       if (hb) hb.style.display = "";
+      document.body.classList.remove("wide-stage");
       resolve(profile ? { profile } : null);
     };
     async function show() {
+      player.pause();
       let data = { clips: [] };
       try {
         data = await (await fetch(`/api/voice/list?canonical_name=${encodeURIComponent(canonicalName)}`)).json();
         profile = data.profile || profile;
       } catch { /* empty list */ }
-      const clips = data.clips || [];
+      const clips = [...(data.clips || [])].reverse(); // oldest first, numbered 1..n
+      const full = clips.length >= MAX_CLIPS;
       const wrap = document.createElement("section");
-      wrap.className = "card voice-card";
+      wrap.className = "card photo-card voice-step";
       wrap.innerHTML = `
         <h2>Voice Scan</h2>
-        <p class="voice-note">These recordings build your avatar's voice. The program picks the clearest speech from all of them. You can also drop audio files into this profile's voice folder.</p>
-        <div class="voice-clips">${
-          clips.length
-            ? clips
-                .map(
-                  (c) => `<div class="voice-clip"><div class="voice-clip-name">${esc(c.locked ? "Locked voice (reference.wav)" : c.name)}${c.seconds ? ` <span>${c.seconds}s</span>` : ""}</div>
-                  <audio controls preload="none" src="${esc(c.url)}"></audio>
-                  <button type="button" class="photo-del voice-del" data-name="${esc(c.name)}" title="Delete this recording"></button></div>`
-                )
-                .join("")
-            : '<p class="voice-empty">No recordings yet.</p>'
-        }</div>
-        <div class="step-actions step-actions--row">
-          <button type="button" class="btn-ghost" id="vs-done">Done</button>
-          <button type="button" class="btn-primary" id="vs-record">Record another</button>
-        </div>`;
+        ${clips.length ? `<p class="photo-label">Your recordings. Click one to listen to it.</p>
+        <div class="photo-gallery" style="--n:${clips.length}">${clips
+          .map(
+            (c, i) => `<div class="photo-thumb voice-tile" data-url="${esc(c.url)}" data-name="${esc(c.name)}" title="Play">
+              <span class="voice-play"></span>
+              <span class="voice-tile-title">${c.locked ? "Locked voice" : `Recording ${i + 1}`}</span>
+              <span class="voice-tile-len">${c.seconds ? `${c.seconds} s` : ""}</span>
+              <button type="button" class="photo-del" data-del="${esc(c.name)}" title="Delete this recording"></button>
+            </div>`
+          )
+          .join("")}</div>` : ""}
+        <p class="photo-label">${clips.length ? `You can have up to ${MAX_CLIPS} recordings per profile. You can delete a recording by clicking the <span class="photo-x" aria-label="X"></span>.` : "Add a recording of your voice"}</p>
+        <div class="photo-options${full ? " full" : ""}">
+          <button type="button" class="photo-option" id="vs-rec"${full ? " disabled" : ""}><strong>Record new audio</strong><span>You will read a short passage aloud, about 40 seconds. The program picks the clearest speech to build your voice.</span></button>
+          <button type="button" class="photo-option" id="vs-up"${full ? " disabled" : ""}><strong>Upload audio</strong><span>Choose a recording of your voice (wav, mp3, m4a, ogg). Clear speech with little background noise works best.</span></button>
+        </div>
+        <input type="file" id="vs-file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm,.flac" hidden />
+        <div class="step-actions step-actions--row"><button type="button" class="btn-ghost" id="vs-done">Done</button></div>`;
       root.innerHTML = "";
       root.appendChild(wrap);
       wrap.querySelector("#vs-done").onclick = finish;
-      wrap.querySelector("#vs-record").onclick = async () => {
-        const r = await runVoiceCapture(root, canonicalName, api);
+      const addDone = async (r) => {
         if (r?.profile) profile = r.profile;
         show();
       };
-      wrap.querySelectorAll(".voice-del").forEach((b) => {
+      wrap.querySelector("#vs-rec").onclick = async () => {
+        document.body.classList.remove("wide-stage");
+        const r = await runVoiceCapture(root, canonicalName, api);
+        document.body.classList.add("wide-stage");
+        addDone(r);
+      };
+      const file = wrap.querySelector("#vs-file");
+      wrap.querySelector("#vs-up").onclick = () => file.click();
+      file.onchange = async () => {
+        const f = file.files[0];
+        if (!f) return;
+        const dataUrl = await new Promise((res) => {
+          const rd = new FileReader();
+          rd.onload = () => res(rd.result);
+          rd.readAsDataURL(f);
+        });
+        const r = await reviewVoice(root, canonicalName, api, dataUrl);
+        addDone(r);
+      };
+      wrap.ondragover = (e) => e.preventDefault();
+      wrap.ondrop = async (e) => {
+        e.preventDefault();
+        const f = [...(e.dataTransfer?.files || [])].find((x) => x.type.startsWith("audio/"));
+        if (!f || full) return;
+        const dataUrl = await new Promise((res) => {
+          const rd = new FileReader();
+          rd.onload = () => res(rd.result);
+          rd.readAsDataURL(f);
+        });
+        addDone(await reviewVoice(root, canonicalName, api, dataUrl));
+      };
+      // click a tile to play it (click again to stop)
+      let playing = null;
+      const clear = () => wrap.querySelectorAll(".voice-tile").forEach((x) => x.classList.remove("playing"));
+      player.onended = clear;
+      wrap.querySelectorAll(".voice-tile").forEach((tile) => {
+        tile.onclick = (e) => {
+          if (e.target.closest(".photo-del")) return;
+          if (playing === tile && !player.paused) {
+            player.pause();
+            clear();
+            return;
+          }
+          clear();
+          playing = tile;
+          player.src = tile.dataset.url;
+          player.play().catch(() => {});
+          tile.classList.add("playing");
+        };
+      });
+      wrap.querySelectorAll(".photo-del").forEach((b) => {
         b.onclick = async () => {
           if (!confirm("Delete this recording?")) return;
-          const out = await api("/api/voice/delete", { canonical_name: canonicalName, name: b.dataset.name });
+          const out = await api("/api/voice/delete", { canonical_name: canonicalName, name: b.dataset.del });
           if (out.profile) profile = out.profile;
           show();
         };

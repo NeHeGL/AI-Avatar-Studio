@@ -146,3 +146,44 @@ def build_reference(vdir: Path, load_audio) -> dict | None:
     sources = sorted({s["src"] for s in chosen})
     meta.write_text(json.dumps({"fingerprint": fp, "seconds": len(y) / SR, "speech_seconds": total, "sources": sources}), encoding="utf-8")
     return {"path": out, "seconds": len(y) / SR, "speech_seconds": total, "sources": sources, "rebuilt": True, "pinned": False}
+
+
+def assess(x: np.ndarray, sr: int) -> dict:
+    """Is this recording good enough to copy a voice from? Returns {"verdict": good|usable|bad, "issues": [{"level","text"}], "seconds",
+    "speech_seconds", "snr_db", "clipped_pct", "sample_rate"} in plain language."""
+    x = np.asarray(x, dtype=np.float32)
+    seconds = len(x) / sr if sr else 0.0
+    issues: list[dict] = []
+
+    def issue(level: str, text: str) -> None:
+        issues.append({"level": level, "text": text})
+
+    xc = _clean(x, sr)
+    segs = _segments(xc, SR)
+    speech = sum(s["dur"] for s in segs)
+    frame = int(SR * 0.02)
+    n = len(xc) // frame
+    snr = 0.0
+    if n >= 10:
+        db = 20 * np.log10(np.sqrt((xc[: n * frame].reshape(n, frame) ** 2).mean(1)) + 1e-9)
+        snr = float(np.percentile(db, 95) - np.percentile(db, 10))
+    clip = float((np.abs(x) > 0.985).mean()) * 100 if len(x) else 0.0
+    if speech < 3:
+        issue("bad", "There is hardly any clear speech in this recording. Use one where you talk for at least 10 seconds, with little background noise.")
+    elif speech < 8:
+        issue("warn", f"Only about {speech:.0f} seconds of clear speech. 20 seconds or more gives a better copy of your voice.")
+    elif speech < 15:
+        issue("warn", f"About {speech:.0f} seconds of clear speech. More is better; 20 seconds or more works best.")
+    if clip > 2.0:
+        issue("bad", "The recording is distorted: it was too loud and the sound is clipped. Record again with the microphone further away or the volume lower.")
+    elif clip > 0.3:
+        issue("warn", "The loudest parts are a little clipped (too loud).")
+    if speech >= 3:
+        if snr < 12:
+            issue("bad", "There is too much background noise or echo. Use a quieter room.")
+        elif snr < 20:
+            issue("warn", "There is some background noise. A quieter room gives a cleaner voice.")
+    if sr < 16000:
+        issue("warn", f"The recording is phone quality ({sr // 1000} kHz). The voice will sound dull; a recording from a microphone is better.")
+    verdict = "bad" if any(i["level"] == "bad" for i in issues) else ("usable" if issues else "good")
+    return {"verdict": verdict, "issues": issues, "seconds": round(seconds, 1), "speech_seconds": round(speech, 1), "snr_db": round(snr), "clipped_pct": round(clip, 2), "sample_rate": int(sr)}
