@@ -159,13 +159,13 @@ export async function runFaceScan(root, canonicalName, api) {
           <div class="orbit-pane"><canvas id="orbit-model" class="orbit-model" width="480" height="480"></canvas><img id="stitch-live" class="orbit-model" alt="Stitched skin" style="display:none"><p class="orbit-cap">Live mesh: your face as it is mapped</p></div>
           <div class="scan-texts">
             <div class="scan-live scan-stats" id="scan-live" aria-live="off"></div>
-            <div class="step-actions step-actions--row scan-buttons">
-              <button type="button" class="btn-ghost" id="scan-cancel">Cancel</button>
-              <button type="button" class="btn-primary" id="scan-done" disabled>Save</button>
-            </div>
           </div>
         </div>
         <p class="orbit-tip" id="scan-tip"></p>
+        <div class="step-actions step-actions--row scan-buttons">
+          <button type="button" class="btn-ghost" id="scan-cancel">Cancel</button>
+          <button type="button" class="btn-primary" id="scan-done" disabled>Save</button>
+        </div>
       </div>
     </div>
   `;
