@@ -71,7 +71,7 @@ export async function runPhotoStep(root, canonicalName, api) {
          <div class="photo-gallery">${photos
            .map(
              (p) => `<div class="photo-thumb${p.active ? " active" : ""}" data-name="${esc(p.name)}" title="${p.active ? "In use" : "Use this photo"}">
-               <img src="${esc(p.url)}" alt="Your photo" />${p.active ? '<span class="photo-tag">In use</span>' : `<button type="button" class="photo-del" data-del="${esc(p.name)}" title="Delete this photo">&times;</button>`}
+               <img src="${esc(p.url)}" alt="Your photo" />${p.active ? '<span class="photo-tag">In use</span>' : ""}<button type="button" class="photo-del" data-del="${esc(p.name)}" title="Delete this photo">&times;</button>
              </div>`
            )
            .join("")}</div>`
@@ -106,7 +106,8 @@ export async function runPhotoStep(root, canonicalName, api) {
     });
     wrap.querySelectorAll(".photo-del").forEach((el) => {
       el.onclick = async () => {
-        if (!confirm("Delete this photo?")) return;
+        const inUse = el.closest(".photo-thumb")?.classList.contains("active");
+        if (!confirm(inUse ? "Delete the photo your avatar is using? Another photo will be used instead (or you'll need to add one)." : "Delete this photo?")) return;
         await api("/api/photo/delete", { canonical_name: canonicalName, name: el.dataset.del });
         choose();
       };

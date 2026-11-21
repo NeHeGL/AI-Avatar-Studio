@@ -1285,3 +1285,6 @@ body:has(.photo-card) .app { max-width: 1120px; }
 .photo-issues li.bad { color: #ff9a8d; }
 .photo-issues li.warn { color: #ffcf85; }
 @media (max-width: 900px) { .photo-options, .photo-cam, .photo-review { grid-template-columns: 1fr; } }
+
+.photo-del { width: 26px; height: 26px; font-size: 1.1rem; opacity: .85; }
+.photo-del:hover { background: #d9534f; opacity: 1; }

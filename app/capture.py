@@ -187,6 +187,10 @@ def delete_photo(canonical_name: str, name: str) -> dict:
     if cur["photos"]:
         act = next((r for r in cur["photos"] if r["active"]), cur["photos"][-1])
         _pin(canonical_name, act["name"])  # the avatar might have been made from the deleted one
+    else:
+        from app.photoreal import invalidate
+
+        invalidate(canonical_name)  # no photo left: everything made from it goes too
     return {"status": "ok", "profile": profile_summary(profile), **photos(canonical_name)}
 
 
