@@ -179,7 +179,10 @@ def ensure_source(canonical_name: str, force: bool = False) -> Path | None:
         img = cv2.imread(str(photo_path))
         if img is None:
             return None
-        img = _clean_borders(img)
+        if photo_path.name.startswith("portrait_"):
+            pass  # made by the Photo step: already the exact framed 512 picture. Denoising, sharpening or enlarging it would only soften it
+        else:
+            img = _clean_borders(img)
         h, w = img.shape[:2]
         if min(h, w) < 96:
             return None
