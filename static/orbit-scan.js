@@ -11,7 +11,7 @@ import { estimateHeadPose, scoreCapture } from "/static/face-pose.js?v=25";
 const CAPTURE_PX = 640;
 const SCAN_WIDE = 1.5; // saved scan photos include hair, ears and neck around the on-screen circle
 const FRONTAL_PX = 1024;
-const FACE_PX_GOOD = 300; // the saved photos are cropped and enlarged around your face, so what counts is how many camera pixels it covers, not how big it looks
+const FACE_PX_GOOD = 180; // the saved photos are cropped and enlarged around your face, so what counts is how many camera pixels it covers, not how big it looks
 const BASELINE_FRAMES = 20;
 const CAPTURE_INTERVAL_MS = 110;
 const FRONTAL_INDEX = 100; // hero photo slot; grid cells use 0..44
@@ -267,7 +267,7 @@ export async function runFaceScan(root, canonicalName, api) {
     const worst = Math.min(size, stab, centre);
     let advice = "";
     if (worst >= 0.85) advice = "Photo quality is good.";
-    else if (worst === size) advice = `Move a little closer, or sit in better light so the camera keeps detail.`;
+    else if (worst === size) advice = `Lean in a little, or add light so the camera keeps detail.`;
     else if (worst === stab) advice = "Hold still for half a second at each position; moving blurs the photo.";
     else advice = "Keep your face in the middle of the camera view.";
     return `Photo quality right now — face width ${Math.round(faceW)} px (${FACE_PX_GOOD} px or more is plenty) · steadiness ${pct(stab)}% · centring ${pct(centre)}%. ${advice}\n${toneReport()}`;
