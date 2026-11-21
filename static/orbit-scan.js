@@ -136,6 +136,7 @@ export async function runFaceScan(root, canonicalName, api) {
     const w = Math.abs(r.x - l.x);
     return w > 0.02 ? (n.x - (l.x + r.x) / 2) / w : 1;
   };
+  let liveParts = null; // size / steadiness / centring of the frame on screen right now
   let recenter = null; // frames still to average after the Re-center button
   const baseline = { yaw: 0, pitch: 0, n: 0, sy: 0, sp: 0, ready: false };
   const slots = Array(CELLS.length).fill(null);
@@ -255,8 +256,8 @@ export async function runFaceScan(root, canonicalName, api) {
   /** Plain-language reasons for the accuracy number: which ingredient of the photos is holding it down. */
   function qualitySummary() {
     const have = slots.filter((x) => x && x.parts);
-    if (!have.length) return toneReport();
-    const avg = (k) => have.reduce((a, x) => a + x.parts[k], 0) / have.length;
+    if (!have.length && !liveParts) return toneReport();
+    const avg = (k) => (liveParts ? liveParts[k] : have.reduce((a, x) => a + x.parts[k], 0) / have.length);
     const size = avg("size");
     const stab = avg("stab");
     const centre = avg("centre");
@@ -268,7 +269,7 @@ export async function runFaceScan(root, canonicalName, api) {
     else if (worst === size) advice = `Move closer: your face is about ${pct(faceW)}% of the picture height, aim for 50% or more.`;
     else if (worst === stab) advice = "Hold still for half a second at each position; moving blurs the photo.";
     else advice = "Keep your face in the middle of the camera view.";
-    return `Photo quality — face size ${pct(size)}% · steadiness ${pct(stab)}% · centring ${pct(centre)}%. ${advice}\n${toneReport()}`;
+    return `Photo quality right now — face size ${pct(size)}% · steadiness ${pct(stab)}% · centring ${pct(centre)}%. ${advice}\n${toneReport()}`;
   }
 
   function refresh() {
@@ -1428,6 +1429,17 @@ export async function runFaceScan(root, canonicalName, api) {
     const pitchS = pitch >= 0 ? pitch * (16 / clampN(reach.up * 0.7, 4, 16)) : pitch * (16 / clampN(reach.down * 0.7, 4, 16));
     const { index, dist } = nearestCell(yawS, pitchS);
     activeCell = index;
+    {
+      // the photo-quality text describes the live picture, so it moves as you move closer, hold still or re-centre
+      const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
+      const ff = (box.w * vw) / Math.min(vw, vh);
+      liveParts = {
+        size: Math.min(1, ff / 0.5),
+        stab: 1 - Math.min(1, (framing?.getJitter?.() ?? 0) * 3.2),
+        centre: Math.max(0, Math.min(1, 1 - Math.hypot(1 - box.cx - 0.5, box.cy - 0.5) * 1.4)),
+        faceW: ff,
+      };
+    }
     refresh();
     const tnow = performance.now();
     const jit = framing?.getJitter?.() ?? 0;
