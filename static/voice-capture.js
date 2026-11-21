@@ -217,6 +217,15 @@ export function reviewVoice(root, canonicalName, api, dataUrl) {
 
 const MAX_CLIPS = 5; // shown as tiles, like the photos
 
+/** "Nov 21, 4:11 AM" (the year too when it is not this year): when the recording was made or added. */
+function stamp(sec) {
+  if (!sec) return "";
+  const d = new Date(sec * 1000);
+  const opts = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+  return d.toLocaleString(undefined, opts);
+}
+
 /** The Voice screen, laid out like the Photo screen: your recordings as tiles (click one to play it, x to delete it), then two ways to add
  * another: record a new one (you read a short passage) or upload an audio file. */
 export async function runVoiceStep(root, canonicalName, api) {
@@ -252,6 +261,7 @@ export async function runVoiceStep(root, canonicalName, api) {
               <span class="voice-play"></span>
               <span class="voice-tile-title">${c.locked ? "Locked voice" : `Recording ${i + 1}`}</span>
               <span class="voice-tile-len">${c.seconds ? `${c.seconds} s` : ""}</span>
+              <span class="voice-tile-date">${stamp(c.recorded)}</span>
               <button type="button" class="photo-del" data-del="${esc(c.name)}" title="Delete this recording"></button>
             </div>`
           )

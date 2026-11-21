@@ -70,7 +70,7 @@ export async function runSetupPipeline(ctx, opts = {}) {
     );
     await waitClick("ob-voice");
 
-    const { runVoiceCapture } = await import("/static/voice-capture.js?v=8");
+    const { runVoiceCapture } = await import("/static/voice-capture.js?v=9");
     let voiceResult = await runVoiceCapture(root, state.canonicalName, api);
     while (!voiceResult?.profile) {
       transition(

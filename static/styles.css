@@ -1389,3 +1389,5 @@ body .subtitle:empty { display: none; }
 .voice-tile-title { font-size: 0.95rem; }
 .voice-tile-len { font-size: 0.8rem; color: var(--muted); }
 .voice-review-audio { width: 100%; max-width: 520px; margin: 0.4rem 0 0.2rem; }
+
+.voice-tile-date { font-size: 0.78rem; color: var(--muted); }

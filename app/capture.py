@@ -270,7 +270,7 @@ def voice_list(canonical_name: str) -> dict:
     if d.is_dir():
         for f in sorted(d.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
             if f.is_file() and not f.name.startswith("_") and f.suffix.lower() in _AUDIO_EXT:
-                rows.append({"name": f.name, "url": media_url(str(f)), "seconds": _seconds(f), "locked": f.name.lower() == "reference.wav"})
+                rows.append({"name": f.name, "url": media_url(str(f)), "seconds": _seconds(f), "locked": f.name.lower() == "reference.wav", "recorded": int(f.stat().st_mtime)})
     return {"status": "ok", "clips": rows, "profile": profile_summary(get_working_profile(canonical_name))}
 
 
