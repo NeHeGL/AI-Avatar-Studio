@@ -54,10 +54,13 @@ def _detect(img):
 
 
 def _sharpness(gray: np.ndarray) -> float:
-    """0-1. Variance of the Laplacian at a fixed size (so a big photo is not 'sharper' for being big), on a log scale."""
-    g = cv2.resize(gray, (256, 256), interpolation=cv2.INTER_AREA)
-    v = float(cv2.Laplacian(g, cv2.CV_64F).var())
-    return min(1.0, math.log10(1 + v) / 3.0)
+    """0-1, how sharp the face is. Variance of the Laplacian at a fixed size (so a big photo is not 'sharper' for being big), measured
+    after a light blur: webcam noise and compression speckle look like detail to a plain Laplacian and make a soft picture score as
+    sharp, while real edges survive the light blur. Roughly: 0.4+ sharp, 0.3 a little soft, under 0.22 blurry."""
+    g = cv2.resize(gray, (256, 256), interpolation=cv2.INTER_AREA).astype(np.float32)
+    g = cv2.GaussianBlur(g, (0, 0), 1.2)
+    v = float(cv2.Laplacian(g, cv2.CV_32F).var())
+    return min(1.0, math.log10(1 + v) / 2.2)
 
 
 def _issue(level: str, text: str) -> dict:
@@ -150,9 +153,9 @@ def analyze(img: np.ndarray, make_crop: bool = True) -> dict:
     sharp = _sharpness(gface) if gface.size else 0.0
     bright = float(gface.mean()) if gface.size else 0.0
     contrast = float(gface.std()) if gface.size else 0.0
-    if sharp < 0.3:
+    if sharp < 0.22:
         issues.append(_issue("bad", "The photo is blurry. Use one that is in focus (hold the camera steady, and clean the lens)."))
-    elif sharp < 0.45:
+    elif sharp < 0.32:
         issues.append(_issue("warn", "The photo is a little soft. A sharper one will animate better."))
     if bright < 55:
         issues.append(_issue("bad", "The face is too dark. Use a photo with the light on your face, not behind you."))
@@ -184,7 +187,7 @@ def analyze(img: np.ndarray, make_crop: bool = True) -> dict:
     s = 100.0
     s -= min(40, look * 1.2)
     s -= 30 * min(1, blink / 0.5)
-    s -= 35 * max(0.0, 0.8 - sharp) / 0.8
+    s -= 35 * max(0.0, 0.42 - sharp) / 0.42
     s -= 25 * max(0.0, 300 - face_px) / 300
     s -= 15 * (max(0.0, 110 - bright) / 110 + max(0.0, bright - 190) / 65)
     s -= 8 * min(1, jaw / 0.4)

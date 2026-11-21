@@ -237,6 +237,8 @@ export async function runPhotoStep(root, canonicalName, api) {
     const zoomCap = track?.getCapabilities?.().zoom || null;
     let zoom = zoomCap ? zoomCap.min : 1;
     let lastZoomAt = 0;
+    // keep the picture in focus by itself, where the camera allows it
+    if ((track?.getCapabilities?.().focusMode || []).includes?.("continuous")) track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
     function autoZoom(fhPx, vh) {
       if (!zoomCap || performance.now() - lastZoomAt < 700) return;
       const want = fhPx < TARGET_FACE_PX * 0.85 ? 1.12 : fhPx > TARGET_FACE_PX * 1.6 || (fhPx > 0.62 * vh) ? 1 / 1.12 : 1;
@@ -267,6 +269,7 @@ export async function runPhotoStep(root, canonicalName, api) {
 
     /** Sharpness (variance of the Laplacian) and brightness of the face, from a small copy of it. */
     function faceStats(box) {
+      sctx.filter = "blur(1.2px)"; // webcam noise looks like detail to a sharpness test; a light blur leaves only real edges
       sctx.drawImage(video, box.x, box.y, box.w, box.h, 0, 0, 160, 160);
       const d = sctx.getImageData(0, 0, 160, 160).data;
       const g = new Float32Array(160 * 160);
@@ -380,7 +383,7 @@ export async function runPhotoStep(root, canonicalName, api) {
       const best = Math.max(...sharpHist);
       const move = prevNose ? Math.hypot((lm[1].x - prevNose.x) * vw, (lm[1].y - prevNose.y) * vh) / (fhPx || 1) : 1;
       prevNose = { x: lm[1].x, y: lm[1].y };
-      st.steady = move < 0.012 && fs.sharp >= 0.8 * best && fs.sharp > 10;
+      st.steady = move < 0.012 && fs.sharp >= 0.85 * best;
       st.light = fs.bright > 60 && fs.bright < 215;
 
       const order = ["face", "size", "centre", "straight", "eyes", "steady", "light"];
