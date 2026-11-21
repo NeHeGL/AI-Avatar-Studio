@@ -14,12 +14,13 @@ import numpy as np
 SR = 24000  # the voice engine's own rate
 TARGET_SEC = 12.0  # enough for the engine's 10 s limit, best parts first
 MIN_SEGMENT_SEC = 0.8
+PINNED = "reference.wav"  # a clip the person put here is used exactly as it is and is never rebuilt or replaced
 GAP_SEC = 0.25  # pauses shorter than this inside speech are kept as part of the same stretch
 
 
 def _recordings(vdir: Path) -> list[Path]:
     return sorted(
-        p for p in vdir.iterdir() if p.is_file() and not p.name.startswith("_") and p.suffix.lower() in {".wav", ".webm", ".ogg", ".mp3", ".m4a", ".flac"}
+        p for p in vdir.iterdir() if p.is_file() and not p.name.startswith("_") and p.name.lower() != PINNED and p.suffix.lower() in {".wav", ".webm", ".ogg", ".mp3", ".m4a", ".flac"}
     )
 
 
@@ -77,13 +78,35 @@ def _clean(x: np.ndarray, sr: int) -> np.ndarray:
     return sps.sosfilt(sos, x).astype(np.float32)
 
 
+def _fingerprint(files: list[Path]) -> list:
+    return [[f.name, f.stat().st_size, int(f.stat().st_mtime)] for f in files]
+
+
 def build_reference(vdir: Path, load_audio) -> dict | None:
-    """Write vdir/_ref.wav from all recordings. `load_audio(path)` returns (mono float32, sample_rate).
-    Returns {"path", "seconds", "sources", "speech_seconds"} or None when there is no usable speech."""
+    """The clip the voice engine should copy, for the recordings in vdir. `load_audio(path)` returns (mono float32, sample_rate).
+
+    - A file named reference.wav is the person's own choice: used as it is, never rebuilt, never overwritten.
+    - Otherwise the best speech from every recording in the folder (any dropped-in wav/mp3/m4a/ogg/webm/flac) is joined into _ref.wav.
+      It is rebuilt only when the recordings change, and the previous build is kept as _ref_prev.wav.
+    Returns {"path", "seconds", "speech_seconds", "sources", "rebuilt", "pinned"} or None when there is no usable speech."""
+    import json
+    import shutil
+
     import soundfile as sf
 
-    segs: list[dict] = []
+    pinned = vdir / PINNED
+    if pinned.exists():
+        return {"path": pinned, "seconds": 0.0, "speech_seconds": 0.0, "sources": [PINNED], "rebuilt": False, "pinned": True}
     files = _recordings(vdir)
+    out, meta = vdir / "_ref.wav", vdir / "_ref.json"
+    fp = _fingerprint(files)
+    try:
+        old = json.loads(meta.read_text(encoding="utf-8"))
+        if out.exists() and old.get("fingerprint") == fp:
+            return {"path": out, "seconds": old.get("seconds", 0.0), "speech_seconds": old.get("speech_seconds", 0.0), "sources": old.get("sources", []), "rebuilt": False, "pinned": False}
+    except Exception:
+        pass
+    segs: list[dict] = []
     for f in files:
         try:
             x, sr = load_audio(f)
@@ -117,6 +140,9 @@ def build_reference(vdir: Path, load_audio) -> dict | None:
     rms = float(np.sqrt((y**2).mean()) + 1e-9)
     y = y * min(10 ** (-20 / 20) / rms, 20.0)
     y = np.tanh(y * 1.1) / np.tanh(1.1) * 0.95
-    out = vdir / "_ref.wav"
+    if out.exists():
+        shutil.copyfile(out, vdir / "_ref_prev.wav")  # never lose the clip that was in use
     sf.write(str(out), y.astype(np.float32), SR)
-    return {"path": out, "seconds": len(y) / SR, "speech_seconds": total, "sources": sorted({s["src"] for s in chosen})}
+    sources = sorted({s["src"] for s in chosen})
+    meta.write_text(json.dumps({"fingerprint": fp, "seconds": len(y) / SR, "speech_seconds": total, "sources": sources}), encoding="utf-8")
+    return {"path": out, "seconds": len(y) / SR, "speech_seconds": total, "sources": sources, "rebuilt": True, "pinned": False}

@@ -745,7 +745,12 @@ def _voice_reference(canonical_name: str) -> tuple[str, Path | None, str, str]:
 def start(canonical_name: str) -> dict:
     display, ref, notes, key = _voice_reference(canonical_name)
     if ref is None:
-        return {"status": "error", "message": f"{display} has no voice recording yet, so there is nothing to clone."}
+        from app.storage import voice_dir as _vd
+        from app.voice_prep import _recordings, PINNED
+
+        _d = _vd(key)
+        if not (_d.is_dir() and (( _d / PINNED).exists() or _recordings(_d))):  # clips dropped into the folder count too
+            return {"status": "error", "message": f"{display} has no voice recording yet, so there is nothing to clone."}
     with _lock:
         _models()
         from app.storage import voice_dir
@@ -760,9 +765,13 @@ def start(canonical_name: str) -> dict:
         except Exception as exc:
             _log("could not prepare the voice reference:", exc)
         if built:
-            _log(f"voice reference: {built['seconds']:.1f}s from {built['speech_seconds']:.1f}s of speech in {len(built['sources'])} recording(s)")
-            _state["voice_key"] = None  # a rebuilt clip must be re-learned even for the same person
+            _log(f"voice reference: {'pinned reference.wav' if built['pinned'] else 'built' if built['rebuilt'] else 'kept'} ({built['seconds']:.1f}s from {built['speech_seconds']:.1f}s of speech, {len(built['sources'])} file(s))")
+            if built["rebuilt"] or built["pinned"]:
+                _state["voice_key"] = None  # a changed clip must be re-learned even for the same person
+            ref_wav = built["path"]
         else:
+            if ref is None:
+                return {"status": "error", "message": f"{display}'s voice clips have no clear speech in them."}
             x, sr = _load_any_audio(ref)
             import soundfile as sf
 
