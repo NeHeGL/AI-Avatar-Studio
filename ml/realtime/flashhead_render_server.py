@@ -76,7 +76,11 @@ def prepare(source: Path) -> dict:
         photo = cv2.imread(str(source))
         H, W = photo.shape[:2]
         rgb = cv2.cvtColor(photo, cv2.COLOR_BGR2RGB)
-        boxes, _ = FACE(rgb)
+        try:  # a picture made by the Photo step is already the head-and-shoulders view: use it as it is, no further zoom
+            prepared = bool(json.loads((d / "source_info.json").read_text(encoding="utf-8")).get("prepared"))
+        except Exception:
+            prepared = False
+        boxes, _ = ([[0.0, 0.0, 1.0, 1.0]], None) if prepared else FACE(rgb)
         try:  # a drawing or cartoon the detector cannot read: the person can say where the face is (cinematic/options.json -> "face_box")
             manual = json.loads((d / "options.json").read_text(encoding="utf-8")).get("face_box")
         except Exception:
@@ -88,6 +92,8 @@ def prepare(source: Path) -> dict:
         x1, y1, x2, y2 = boxes[0][0] * W, boxes[0][1] * H, boxes[0][2] * W, boxes[0][3] * H
         cx, cy, side = (x1 + x2) / 2, (y1 + y2) / 2, (x2 - x1) * 2.0
         box = [int(max(0, cx - side * 0.5)), int(max(0, cy - side * 0.55)), int(min(W, cx + side * 0.5)), int(min(H, cy + side * 0.45))]
+        if prepared:
+            box = [0, 0, W, H]
         Image.fromarray(cv2.resize(rgb[box[1]:box[3], box[0]:box[2]], (512, 512), interpolation=cv2.INTER_AREA)).save(d / "talk_crop.png")
         # the REST frame: how FlashHead itself draws the still photo (frame 0 of a render of silence). Every clip starts from it and
         # lands back on it, and the page shows it as the still picture, so one clip follows the next without a visible join

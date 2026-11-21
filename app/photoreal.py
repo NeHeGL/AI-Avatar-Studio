@@ -193,7 +193,7 @@ def ensure_source(canonical_name: str, force: bool = False) -> Path | None:
             (out.parent / "matte.png").unlink(missing_ok=True)
         head_ok, head_note = head_in_frame(img)
         (out.parent / "source_info.json").write_text(
-            json.dumps({"from": photo_path.name, "width": w, "height": h, "head_in_frame": head_ok, "head_note": head_note}, indent=2),
+            json.dumps({"from": photo_path.name, "prepared": photo_path.name.startswith("portrait_"), "width": w, "height": h, "head_in_frame": head_ok, "head_note": head_note}, indent=2),
             encoding="utf-8",
         )
         return out

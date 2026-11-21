@@ -329,9 +329,9 @@ export async function runPhotoStep(root, canonicalName, api) {
       let ts = Math.min(vw, vh);
       if (lm) {
         const fh = (lm[152].y - lm[10].y) * vh;
-        ts = Math.max(Math.min(vw, vh) * 0.4, Math.min(fh / 0.36, Math.min(vw, vh)));
+        ts = Math.max(Math.min(vw, vh) * 0.4, Math.min(fh * 1.9, Math.min(vw, vh)));
         tcx = ((lm[234].x + lm[454].x) / 2) * vw;
-        tcy = ((lm[10].y + lm[152].y) / 2) * vh + 0.1 * ts;
+        tcy = ((lm[10].y + lm[152].y) / 2) * vh - 0.05 * ts;
       }
       if (!cam.s) Object.assign(cam, { cx: tcx, cy: tcy, s: ts });
       const k = 0.18; // glide, do not jump

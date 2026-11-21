@@ -21,7 +21,11 @@ _MODEL = Path(__file__).resolve().parent.parent / "static" / "vendor" / "mediapi
 _landmarker = None
 
 OUT_PX = 512  # prepared picture size (the video engine works at 512)
-FACE_FRACTION = 0.36  # the face (forehead to chin) fills about this much of the picture's height: head, shoulders and upper chest
+# This is exactly the framing the video engine uses for its head-and-shoulders view (a square twice the width of its face box, which is
+# about 0.95 x the forehead-to-chin height, with the face centre 55% of the way down). The saved photo IS that view, so the avatar shows
+# the photo as it is, with no further zoom.
+FACE_FRACTION = 1 / 1.9
+FACE_CENTRE_DOWN = 0.55
 
 
 def _lm():
@@ -32,7 +36,7 @@ def _lm():
 
         _landmarker = vision.FaceLandmarker.create_from_options(
             vision.FaceLandmarkerOptions(
-                base_options=mpp.BaseOptions(model_asset_path=str(_MODEL)),
+                base_options=mpp.BaseOptions(model_asset_buffer=_MODEL.read_bytes()),
                 output_face_blendshapes=True,
                 output_facial_transformation_matrixes=True,
                 num_faces=2,
@@ -125,7 +129,7 @@ def analyze(img: np.ndarray, make_crop: bool = True) -> dict:
     S = min(S, h, w)
     # the person's head sits a little above the middle of a portrait: put the face centre slightly above the crop centre
     cx = face_cx
-    cy = face_cy + 0.10 * S  # the face sits in the upper part of the picture, with the upper torso below it
+    cy = face_cy + (0.5 - FACE_CENTRE_DOWN) * S  # the face centre sits a little below the middle, shoulders under it
     left = int(round(cx - S / 2))
     topc = int(round(cy - S / 2))
     left = max(0, min(left, w - int(S)))

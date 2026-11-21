@@ -152,7 +152,7 @@ def save_photo(canonical_name: str, image: str) -> dict:
         d.mkdir(parents=True, exist_ok=True)
         import cv2
 
-        name = f"photo_{uuid4().hex[:8]}.jpg"
+        name = f"portrait_{uuid4().hex[:8]}.jpg"  # the prefix tells the video engine this picture is already framed
         cv2.imwrite(str(d / name), r["crop"], [cv2.IMWRITE_JPEG_QUALITY, 95])
         profile.scan_assets.append(ScanAsset(id=f"photo-{uuid4().hex[:8]}", path=str(d / name), caption="Photo", quality_score=float(r["score"]) / 100.0, tracked=True))
         profile.scan_skipped = False
