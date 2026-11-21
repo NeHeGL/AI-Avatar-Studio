@@ -51,8 +51,8 @@ export async function runFaceScan(root, canonicalName, api) {
   let framesSeen = 0;
   let lastCaptureAt = 0;
   let frontal = null;
-  let flipYaw = store.get("scanFlipYaw");
-  let flipPitch = store.get("scanFlipPitch2", true); // up/down is flipped by default
+  const flipYaw = false; // fixed: the old Flip buttons were never needed
+  const flipPitch = true;
   let edges = null;
   let mod2 = null;
   let lastLm = null;
@@ -164,8 +164,6 @@ export async function runFaceScan(root, canonicalName, api) {
         </div>
         <div class="step-actions step-actions--row scan-buttons">
           <button type="button" class="btn-ghost" id="scan-cancel">Back</button>
-          <button type="button" class="btn-ghost" id="flip-yaw" title="Use if the dots move opposite to your head">Flip left/right</button>
-          <button type="button" class="btn-ghost" id="flip-pitch" title="Use if looking up fills the bottom rows">Flip up/down</button>
           <button type="button" class="btn-primary" id="scan-done" disabled>Done scanning</button>
         </div>
       </div>
@@ -1613,14 +1611,6 @@ export async function runFaceScan(root, canonicalName, api) {
     if (hb) hb.textContent = "Cancel";
     btnDone.onclick = () => void finishScan();
     wrap.querySelector("#scan-recenter").onclick = () => { recenter = { n: 0, sy: 0, sp: 0 }; };
-    wrap.querySelector("#flip-yaw").onclick = () => {
-      flipYaw = !flipYaw;
-      store.set("scanFlipYaw", flipYaw);
-    };
-    wrap.querySelector("#flip-pitch").onclick = () => {
-      flipPitch = !flipPitch;
-      store.set("scanFlipPitch2", flipPitch);
-    };
     (async () => {
       try {
         await startCamera();
