@@ -760,7 +760,7 @@ import {
   runSetupPipeline,
   setCinematicMode,
   setPhaseLabels,
-} from "/static/onboarding-flow.js?v=3";
+} from "/static/onboarding-flow.js?v=4";
 
 /** Startup screen: the chat brain, ears, speech engine and video animation load once, here, so everything is ready when a person is picked. */
 const STARTUP_ROWS = [

@@ -65,54 +65,33 @@ export async function runSetupPipeline(ctx, opts = {}) {
   const skipFinish = opts.skipFinishCard === true;
 
   async function faceIntro() {
-    setPhaseLabels(phaseLabel, statusHint, "Face", "");
+    setPhaseLabels(phaseLabel, statusHint, "", "");
     transition(
       root,
       `
       <section class="step-card step-card--center">
-        <p class="step-eyebrow">Face</p>
         <h2 class="step-title">We'll scan your face</h2>
         <p class="step-copy">Move your head slowly around the circle so we can see you from every angle — like Face&nbsp;ID.</p>
-        <div class="step-actions">
+        <div class="step-actions step-actions--solo">
           <button type="button" class="btn-primary" id="ob-continue">Continue</button>
-          <button type="button" class="btn-ghost" id="ob-skip-face">No face to scan — skip</button>
         </div>
       </section>`
     );
-    // "body" = Continue, "skip" = no face (waitClickEither names its two answers that way)
-    return waitClickEither("ob-continue", "ob-skip-face");
+    return waitClick("ob-continue");
   }
 
-  // A cartoon character, a pet or a voice-only avatar has no face to scan: remember that choice and move on.
-  async function skipFaceScan() {
-    const r = await api("/api/capture/skip-scan", { canonical_name: state.canonicalName });
-    if (r?.profile) state.profile = r.profile;
-  }
-
-  let faceWasSkipped = false;
   if (needFace) {
-    let skipFace = (await faceIntro()) === "skip";
-    if (!skipFace) {
-      const { runFaceScan } = await import("/static/orbit-scan.js?v=41");
-      let faceResult = await runFaceScan(root, state.canonicalName, api);
-      while (!faceResult?.profile) {
-        // Back / cancel from the scan: offer the retry, or going on without a face scan (it used to dead-end here).
-        if (confirm("Face scan wasn't saved. Open face scan again?\n\nCancel to continue without a face scan.")) {
-          faceResult = await runFaceScan(root, state.canonicalName, api);
-        } else {
-          skipFace = true;
-          break;
-        }
-      }
-      if (!skipFace) state.profile = faceResult.profile;
+    // The face scan is required: if it is cancelled, go back to the start of it (the header's Change profile button leaves).
+    const { runFaceScan } = await import("/static/orbit-scan.js?v=59");
+    let faceResult = null;
+    while (!faceResult?.profile) {
+      await faceIntro();
+      faceResult = await runFaceScan(root, state.canonicalName, api);
     }
-    if (skipFace) {
-      await skipFaceScan();
-      faceWasSkipped = true;
-    }
+    state.profile = faceResult.profile;
   }
 
-  if (offerBody && !faceWasSkipped) {
+  if (offerBody) {
     setPhaseLabels(phaseLabel, statusHint, "Body", "Optional");
     transition(
       root,
@@ -135,13 +114,12 @@ export async function runSetupPipeline(ctx, opts = {}) {
   }
 
   if (needVoice) {
-    setPhaseLabels(phaseLabel, statusHint, "Voice Scan", "");
+    setPhaseLabels(phaseLabel, statusHint, "", "");
     transition(
       root,
       `
       <section class="step-card step-card--center">
-        <p class="step-eyebrow">Voice Scan</p>
-        <h2 class="step-title">Teach it your voice</h2>
+        <h2 class="step-title">We'll scan your voice</h2>
         <p class="step-copy">You'll read a short line aloud so your avatar can sound like you.</p>
         <div class="step-actions step-actions--solo">
           <button type="button" class="btn-primary" id="ob-voice">Continue</button>
@@ -150,15 +128,14 @@ export async function runSetupPipeline(ctx, opts = {}) {
     );
     await waitClick("ob-voice");
 
-    const { runVoiceCapture } = await import("/static/voice-capture.js");
+    const { runVoiceCapture } = await import("/static/voice-capture.js?v=5");
     let voiceResult = await runVoiceCapture(root, state.canonicalName, api);
     while (!voiceResult?.profile) {
       transition(
         root,
         `
         <section class="step-card step-card--center">
-          <p class="step-eyebrow">Voice Scan</p>
-          <h2 class="step-title">Teach it your voice</h2>
+          <h2 class="step-title">We'll scan your voice</h2>
           <p class="step-copy">You'll read a short line aloud so your avatar can sound like you.</p>
           <div class="step-actions step-actions--solo">
             <button type="button" class="btn-primary" id="ob-voice-retry">Continue</button>
