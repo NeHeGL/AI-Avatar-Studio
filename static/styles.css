@@ -1305,3 +1305,7 @@ body:has(.photo-card) .app { max-width: 1120px; }
 .photo-card { --thumb: 150px; }
 .photo-gallery { display: grid; grid-template-columns: repeat(var(--n, 1), minmax(0, var(--thumb))); gap: 12px; justify-content: start; flex-wrap: nowrap; }
 .photo-thumb { width: 100%; height: auto; aspect-ratio: 1; }
+
+.photo-options.full .photo-option { opacity: .45; cursor: not-allowed; }
+.photo-card { --thumb: 150px; }
+.photo-gallery { gap: 8px; }

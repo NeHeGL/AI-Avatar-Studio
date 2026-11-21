@@ -6,6 +6,7 @@
  * camera with your eyes open, held still and in focus. At the end the server keeps only the best one.
  */
 const MP = "/static/vendor/mediapipe";
+const MAX_PHOTOS = 8; // the saved photos fit on one row at a good size
 const MAX_SNAPS = 6;
 const SNAP_GAP_MS = 700;
 const TARGET_FACE_PX = 280; // what the zoom aims for
@@ -79,8 +80,8 @@ export async function runPhotoStep(root, canonicalName, api) {
     show(`
       <h2>Your Photo</h2>
       ${gallery}
-      <p class="photo-label">${photos.length ? "Add another photo" : "Add a photo of your face"}</p>
-      <div class="photo-options">
+      <p class="photo-label">${photos.length >= MAX_PHOTOS ? `You have ${MAX_PHOTOS} photos, the most that can be kept. Delete one (the &times; on it) to add another.` : photos.length ? "Add another photo" : "Add a photo of your face"}</p>
+      <div class="photo-options${photos.length >= MAX_PHOTOS ? " full" : ""}">
         <button type="button" class="photo-option" id="ph-cam"><strong>Use your webcam</strong><span>Look at the camera. It takes the pictures by itself when you are looking straight ahead, eyes open and in focus, and keeps the best.</span></button>
         <button type="button" class="photo-option" id="ph-up"><strong>Upload a photo</strong><span>Choose a picture of your face, or drop one here. It is centred, zoomed and cropped for you.</span></button>
       </div>
@@ -88,14 +89,15 @@ export async function runPhotoStep(root, canonicalName, api) {
       <div class="step-actions step-actions--row"><button type="button" class="btn-ghost" id="ph-cancel">${photos.length ? "Done" : "Cancel"}</button></div>`);
     const file = wrap.querySelector("#ph-file");
     wrap.querySelector("#ph-cancel").onclick = () => leave(photos.length ? { profile } : null);
-    wrap.querySelector("#ph-cam").onclick = webcam;
-    wrap.querySelector("#ph-up").onclick = () => file.click();
+    const full = photos.length >= MAX_PHOTOS;
+    wrap.querySelector("#ph-cam").onclick = full ? null : webcam;
+    wrap.querySelector("#ph-up").onclick = full ? null : () => file.click();
     file.onchange = () => file.files[0] && uploaded(file.files[0]);
     wrap.ondragover = (e) => e.preventDefault();
     wrap.ondrop = (e) => {
       e.preventDefault();
       const f = [...(e.dataTransfer?.files || [])].find((x) => x.type.startsWith("image/"));
-      if (f) uploaded(f);
+      if (f && photos.length < MAX_PHOTOS) uploaded(f);
     };
     wrap.querySelectorAll(".photo-thumb").forEach((el) => {
       el.onclick = async (e) => {

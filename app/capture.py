@@ -65,6 +65,9 @@ def _angle_index_from_asset(asset: ScanAsset) -> int | None:
         return None
 
 
+MAX_PHOTOS = 8  # kept in step with the Photo page: they all fit on one row
+
+
 def _decode_image(b64: str):
     import cv2
     import numpy as np
@@ -148,6 +151,10 @@ def save_photo(canonical_name: str, image: str) -> dict:
         if not r["ok"]:
             return {"status": "error", "message": r["issues"][0]["text"] if r["issues"] else "That photo cannot be used."}
         profile = get_working_profile(canonical_name)
+        from app.profile_logic import face_assets
+
+        if len(face_assets(profile)) >= MAX_PHOTOS:
+            return {"status": "error", "message": f"{MAX_PHOTOS} photos is the most that can be kept. Delete one to add another."}
         d = media_dir(canonical_name) / "scan"
         d.mkdir(parents=True, exist_ok=True)
         import cv2
