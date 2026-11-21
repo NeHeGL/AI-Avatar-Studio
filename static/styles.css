@@ -1176,3 +1176,8 @@ body.wide-stage .app { max-width: 1120px; }
 
 /* side-by-side layout: the avatar may use more of the window height */
 body.wide-stage .avatar-stage .avatar-figure.mesh { width: min(400px, 50vh); height: min(400px, 50vh); }
+
+/* side-by-side layout: the corner text sits closer to the card */
+body.wide-stage .app { padding-top: 1.1rem; padding-bottom: 1.1rem; }
+body.wide-stage .screen-root { margin-top: 0.25rem; }
+body.wide-stage .credit { margin-top: 0.9rem; }
