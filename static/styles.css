@@ -1353,3 +1353,7 @@ body .subtitle:empty { display: none; }
 /* the two "add a photo" cards: hovering them only outlines them (the generic button hover filled them with the accent colour and hid the text) */
 .photo-option:hover { background: var(--surface); color: inherit; border-color: var(--accent, #4f9cff); }
 .photo-options.full .photo-option:hover { border-color: var(--border); }
+
+/* a lone Continue / Save button is compact and centred, like the Hello screen's, not a bar across the card */
+.screen-root > .step-card .step-actions--solo { display: flex; justify-content: center; }
+.screen-root > .step-card .step-actions--solo > button { width: auto; min-width: 220px; padding-left: 2.5rem; padding-right: 2.5rem; }
