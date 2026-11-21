@@ -1212,3 +1212,8 @@ body.cinematic .orbit-card.face-scan-card { background: var(--surface); border: 
 
 .orbit-card .recenter-btn { margin-top: 0.5rem; padding: 0.3rem 0.9rem; font-size: 0.85rem; }
 .avatar-stage .stage-left .chat-meter { width: 100%; max-width: 20rem; flex: none; }
+
+/* Face scan numbers: a tidy label / value list */
+.orbit-card .scan-stats { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 0.9rem; height: auto; min-height: 0; overflow: hidden; font-size: 0.85rem; line-height: 1.4; text-align: left; margin: 0; }
+.orbit-card .scan-stats .k { color: var(--muted); }
+.orbit-card .scan-stats .v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

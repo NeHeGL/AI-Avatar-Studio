@@ -160,8 +160,7 @@ export async function runFaceScan(root, canonicalName, api) {
         <div class="scan-mid">
           <div class="orbit-pane"><canvas id="orbit-model" class="orbit-model" width="480" height="480"></canvas><img id="stitch-live" class="orbit-model" alt="Stitched skin" style="display:none"><p class="orbit-cap">Live mesh: your face as it is mapped</p></div>
           <div class="scan-texts">
-            <p class="scan-live" id="scan-live" aria-live="polite"></p>
-            <p class="orbit-quality" id="scan-quality"></p>
+            <div class="scan-live scan-stats" id="scan-live" aria-live="off"></div>
           </div>
         </div>
         <div class="step-actions step-actions--row scan-buttons">
@@ -179,7 +178,20 @@ export async function runFaceScan(root, canonicalName, api) {
   const accText = wrap.querySelector("#acc-text");
   const tipEl = wrap.querySelector("#scan-tip");
   const liveImg = wrap.querySelector("#stitch-live");
-  const qualEl = wrap.querySelector("#scan-quality");
+  // The numbers beside the face map: one fixed row per fact (label left, value right), so nothing grows, shrinks or wraps.
+  let statusMsg = "Starting…";
+  let liveRows = null;
+  let qualRows = [];
+  const esc = (v) => String(v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  function renderStats() {
+    const rows = [["Status", statusMsg], ...(liveRows || []), ...(liveRows ? qualRows : [])];
+    liveEl.innerHTML = rows.map(([k, v]) => `<span class="k">${esc(k)}</span><span class="v" title="${esc(v)}">${esc(v)}</span>`).join("");
+  }
+  function showStatus(msg) {
+    statusMsg = msg;
+    liveRows = null;
+    renderStats();
+  }
   const grid = wrap.querySelector("#orbit-grid");
   const btnDone = wrap.querySelector("#scan-done");
   const btnCancel = wrap.querySelector("#scan-cancel");
@@ -257,7 +269,9 @@ export async function runFaceScan(root, canonicalName, api) {
   /** Plain-language reasons for the accuracy number: which ingredient of the photos is holding it down. */
   function qualitySummary() {
     const have = slots.filter((x) => x && x.parts);
-    if (!have.length && !liveParts) return toneReport();
+    const tone = toneReport().replace(/^Skin tone: /, "").replace(/\s*\(green.*?\)/, "").replace(/\.$/, "");
+    const toneRow = tone ? [["Skin tone", tone]] : [];
+    if (!have.length && !liveParts) return toneRow;
     const avg = (k) => (liveParts ? liveParts[k] : have.reduce((a, x) => a + x.parts[k], 0) / have.length);
     const size = avg("size");
     const stab = avg("stab");
@@ -266,11 +280,17 @@ export async function runFaceScan(root, canonicalName, api) {
     const pct = (v) => Math.round(v * 100);
     const worst = Math.min(size, stab, centre);
     let advice = "";
-    if (worst >= 0.85) advice = "Photo quality is good.";
-    else if (worst === size) advice = `Lean in a little, or add light so the camera keeps detail.`;
-    else if (worst === stab) advice = "Hold still for half a second at each position; moving blurs the photo.";
-    else advice = "Keep your face in the middle of the camera view.";
-    return `Photo quality right now — face width ${Math.round(faceW)} px (${FACE_PX_GOOD} px or more is plenty) · steadiness ${pct(stab)}% · centring ${pct(centre)}%. ${advice}\n${toneReport()}`;
+    if (worst >= 0.85) advice = "Photo quality is good";
+    else if (worst === size) advice = "Lean in a little, or add light";
+    else if (worst === stab) advice = "Hold still for half a second at each position";
+    else advice = "Keep your face in the middle of the view";
+    return [
+      ["Face width", `${Math.round(faceW)} px (${FACE_PX_GOOD}+ is plenty)`],
+      ["Steadiness", `${pct(stab)}%`],
+      ["Centring", `${pct(centre)}%`],
+      ...toneRow,
+      ["Tip", advice],
+    ];
   }
 
   function refresh() {
@@ -298,7 +318,7 @@ export async function runFaceScan(root, canonicalName, api) {
       el.classList.toggle("dim", !needs);
       el.classList.toggle("active", i === activeCell);
     });
-    qualEl.textContent = qualitySummary();
+    qualRows = qualitySummary();
     btnDone.disabled = acc < DONE_AT || finishing;
     if (!framing?.isModelReady) hint.textContent = "Loading face tracking (the first time takes 10–20 s)…";
     else if (!baseline.ready) hint.textContent = "Look straight at the camera and hold still for a moment…";
@@ -1354,7 +1374,7 @@ export async function runFaceScan(root, canonicalName, api) {
   function onFrame(lm, matrix) {
     if (!lm) {
       lastLm = null;
-      liveEl.textContent = `No face detected — look back toward the camera (frames seen: ${framesSeen}).`;
+      showStatus(`No face detected — look back toward the camera (frames seen: ${framesSeen}).`);
       drawModel();
       return;
     }
@@ -1371,20 +1391,20 @@ export async function runFaceScan(root, canonicalName, api) {
         baseline.n = 0;
         baseline.sy = 0;
         baseline.sp = 0;
-        liveEl.textContent = "Centering…";
+        showStatus("Centering…");
         drawModel();
         return;
       }
       if (Math.abs(symOf(lm)) > 0.05) {
         baseline.n = 0; baseline.sy = 0; baseline.sp = 0;
-        liveEl.textContent = "Look straight at the camera and hold still…";
+        showStatus("Look straight at the camera and hold still…");
         drawModel();
         return;
       }
       baseline.sy += rawYaw;
       baseline.sp += rawPitch;
       baseline.n += 1;
-      liveEl.textContent = `Calibrating ${baseline.n}/${BASELINE_FRAMES} — look straight at the camera`;
+      showStatus(`Calibrating ${baseline.n}/${BASELINE_FRAMES} — look straight at the camera`);
       if (baseline.n >= BASELINE_FRAMES) {
         baseline.yaw = baseline.sy / baseline.n;
         baseline.pitch = baseline.sp / baseline.n;
@@ -1471,7 +1491,14 @@ export async function runFaceScan(root, canonicalName, api) {
     }
     updateTip();
     const here = slots[index] ? Math.round(100 * Math.min(1, steep(slots[index].quality / percentile90(slots.filter(Boolean).map((x) => x.quality))))) : 0;
-    liveEl.textContent = `Square row ${CELLS[index].r + 1}, column ${CELLS[index].c + 1}: ${slots[index] ? `best photo so far ${here}% of your best` : "no photo yet"}   |   Head ${yaw >= 0 ? "right" : "left"} ${Math.abs(yaw).toFixed(0)}° · ${pitch >= 0 ? "up" : "down"} ${Math.abs(pitch).toFixed(0)}°   |   your range so far: sideways ±${reach.yaw.toFixed(0)}°, up ${reach.up.toFixed(0)}°, down ${reach.down.toFixed(0)}°   |   painting: ${diag.last} (${diag.painted} patches painted, ${diag.rejected} colour-adjusted to match neighbours)`;
+    statusMsg = diag.last === "painting" ? "Scanning" : diag.last;
+    liveRows = [
+      ["Square", `row ${CELLS[index].r + 1}, column ${CELLS[index].c + 1}` + (slots[index] ? ` (${here}% of your best)` : " (no photo yet)")],
+      ["Head", `${yaw >= 0 ? "right" : "left"} ${Math.abs(yaw).toFixed(0)}° · ${pitch >= 0 ? "up" : "down"} ${Math.abs(pitch).toFixed(0)}°`],
+      ["Your range", `sideways ±${reach.yaw.toFixed(0)}° · up ${reach.up.toFixed(0)}° · down ${reach.down.toFixed(0)}°`],
+      ["Skin painted", `${diag.painted} patches (${diag.rejected} colour-matched)`],
+    ];
+    renderStats();
 
     const c = CELLS[index];
     const jitter = framing?.getJitter?.() ?? 0;
@@ -1537,7 +1564,7 @@ export async function runFaceScan(root, canonicalName, api) {
       fillWide: SCAN_WIDE,
       onLandmarks: onFrame,
       onStatus: (msg) => {
-        liveEl.textContent = msg;
+        showStatus(msg);
       },
     });
     // Show the whole area that gets saved (SCAN_WIDE x the circle), not just its centre: same box size, wider view.
