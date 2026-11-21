@@ -278,7 +278,7 @@ function renderUpdateAvatarScreen() {
 async function runUpdateSection(section) {
   setCinematicMode(true);
   if (section === "scan") {
-    const { runFaceScan } = await import("/static/orbit-scan.js?v=57");
+    const { runFaceScan } = await import("/static/orbit-scan.js?v=58");
     const result = await runFaceScan(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if (section === "voice") {

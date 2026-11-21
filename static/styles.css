@@ -1228,3 +1228,6 @@ body.cinematic .orbit-card.face-scan-card { background: var(--surface); border: 
 .orbit-card .scan-texts { display: flex; flex-direction: column; }
 .orbit-card .scan-texts .scan-live { height: auto; }
 .orbit-card .scan-texts .scan-buttons { margin-top: auto; padding-top: 0.75rem; }
+
+.orbit-card .scan-mid { flex: none; margin-top: 0; }
+.orbit-card .scan-right .orbit-tip { margin: 0.75rem 0 0; }

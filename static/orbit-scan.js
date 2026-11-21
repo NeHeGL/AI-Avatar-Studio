@@ -155,7 +155,6 @@ export async function runFaceScan(root, canonicalName, api) {
         <button type="button" class="btn-ghost recenter-btn" id="scan-recenter" title="Look straight at the camera, then click: that becomes the centre square">Re-center</button>
       </div>
       <div class="scan-right">
-        <p class="orbit-tip" id="scan-tip"></p>
         <div class="scan-mid">
           <div class="orbit-pane"><canvas id="orbit-model" class="orbit-model" width="480" height="480"></canvas><img id="stitch-live" class="orbit-model" alt="Stitched skin" style="display:none"><p class="orbit-cap">Live mesh: your face as it is mapped</p></div>
           <div class="scan-texts">
@@ -166,6 +165,7 @@ export async function runFaceScan(root, canonicalName, api) {
             </div>
           </div>
         </div>
+        <p class="orbit-tip" id="scan-tip"></p>
       </div>
     </div>
   `;
