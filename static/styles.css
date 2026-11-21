@@ -1316,7 +1316,7 @@ body:has(.photo-card) .app { max-width: 1120px; }
 body.wide-stage .avatar-stage { box-sizing: border-box; min-height: var(--stage-h); }
 body.wide-stage .photo-card { box-sizing: border-box; height: var(--stage-h); overflow: hidden; display: flex; flex-direction: column; padding: 1.25rem 1.5rem; }
 body.wide-stage .photo-card > .photo-label:first-of-type { margin-top: 0; }
-.photo-card { --thumb: 160px; }
+.photo-card { --thumb: 190px; }
 
 /* ===== One frame for EVERY screen: the same title and corner-text positions, and a card of the same size in the same place. ===== */
 body .app { max-width: 1120px; padding-top: 1.1rem; padding-bottom: 1.1rem; }

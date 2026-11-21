@@ -65,7 +65,7 @@ def _angle_index_from_asset(asset: ScanAsset) -> int | None:
         return None
 
 
-MAX_PHOTOS = 8  # kept in step with the Photo page: they all fit on one row
+MAX_PHOTOS = 5  # kept in step with the Photo page: they all fit on one row
 
 
 def _decode_image(b64: str):

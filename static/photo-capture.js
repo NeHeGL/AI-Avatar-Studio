@@ -6,7 +6,7 @@
  * camera with your eyes open, held still and in focus. At the end the server keeps only the best one.
  */
 const MP = "/static/vendor/mediapipe";
-const MAX_PHOTOS = 8; // the saved photos fit on one row at a good size
+const MAX_PHOTOS = 5; // five photos on one row, each as large as the card allows (190 px)
 const MAX_SNAPS = 6;
 const SNAP_GAP_MS = 700;
 const TARGET_FACE_PX = 280; // what the zoom aims for
