@@ -135,22 +135,30 @@ export async function runFaceScan(root, canonicalName, api) {
   wrap.className = "card face-scan-card orbit-card";
   wrap.innerHTML = `
     <h2>Face Scan</h2>
-    <p class="scan-hint" id="scan-hint">Starting camera…</p>
-    <div class="orbit-acc"><div class="orbit-acc-bar"><div id="acc-fill"></div></div><span id="acc-text">Scan accuracy: 0%</span></div>
-    <p class="orbit-tip" id="scan-tip"></p>
-    <div class="orbit-split">
-      <div class="orbit-pane"><div class="scan-video-wrap orbit-video" id="scan-video-wrap"><video id="scan-video" playsinline muted autoplay></video></div><p class="orbit-cap">Your camera</p></div>
-      <div class="orbit-pane"><canvas id="orbit-model" class="orbit-model" width="480" height="480"></canvas><img id="stitch-live" class="orbit-model" alt="Stitched skin" style="display:none"><p class="orbit-cap">Live mesh — your face as it is mapped</p></div>
-    </div>
-    <div class="orbit-grid" id="orbit-grid" aria-label="Pose coverage"></div>
-    <p class="orbit-legend"><span class="lg red"></span> not captured &nbsp; <span class="lg yellow"></span> captured, low quality &nbsp; <span class="lg green"></span> good</p>
-    <p class="scan-live" id="scan-live" aria-live="polite"></p>
-    <p class="orbit-quality" id="scan-quality"></p>
-    <div class="btn-row" style="flex-wrap: wrap;">
-      <button type="button" class="btn-ghost" id="scan-cancel">Back</button>
-      <button type="button" class="btn-ghost" id="flip-yaw" title="Use if the dots move opposite to your head">Flip left/right</button>
-      <button type="button" class="btn-ghost" id="flip-pitch" title="Use if looking up fills the bottom rows">Flip up/down</button>
-      <button type="button" class="btn-primary" id="scan-done" disabled>Done scanning</button>
+    <div class="scan-cols">
+      <div class="scan-left">
+        <div class="orbit-pane"><div class="scan-video-wrap orbit-video" id="scan-video-wrap"><video id="scan-video" playsinline muted autoplay></video></div><p class="orbit-cap">Your camera</p></div>
+        <div class="orbit-grid" id="orbit-grid" aria-label="Pose coverage"></div>
+        <p class="orbit-legend"><span class="lg red"></span> not captured &nbsp; <span class="lg yellow"></span> low quality &nbsp; <span class="lg green"></span> good</p>
+      </div>
+      <div class="scan-right">
+        <p class="scan-hint" id="scan-hint">Starting camera…</p>
+        <div class="orbit-acc"><div class="orbit-acc-bar"><div id="acc-fill"></div></div><span id="acc-text">Scan accuracy: 0%</span></div>
+        <p class="orbit-tip" id="scan-tip"></p>
+        <div class="scan-mid">
+          <div class="orbit-pane"><canvas id="orbit-model" class="orbit-model" width="480" height="480"></canvas><img id="stitch-live" class="orbit-model" alt="Stitched skin" style="display:none"><p class="orbit-cap">Live mesh: your face as it is mapped</p></div>
+          <div class="scan-texts">
+            <p class="scan-live" id="scan-live" aria-live="polite"></p>
+            <p class="orbit-quality" id="scan-quality"></p>
+          </div>
+        </div>
+        <div class="step-actions step-actions--row scan-buttons">
+          <button type="button" class="btn-ghost" id="scan-cancel">Back</button>
+          <button type="button" class="btn-ghost" id="flip-yaw" title="Use if the dots move opposite to your head">Flip left/right</button>
+          <button type="button" class="btn-ghost" id="flip-pitch" title="Use if looking up fills the bottom rows">Flip up/down</button>
+          <button type="button" class="btn-primary" id="scan-done" disabled>Done scanning</button>
+        </div>
+      </div>
     </div>
   `;
   const video = wrap.querySelector("#scan-video");

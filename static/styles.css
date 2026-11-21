@@ -1151,7 +1151,7 @@ body.cinematic .orbit-card.face-scan-card { background: transparent; border: non
   flex: 1;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: safe center; /* centred, but never pushed above the top when a screen is taller than the window */
 }
 .subtitle:empty { display: block; min-height: 1.4em; visibility: hidden; } /* the header keeps the same height with or without a subtitle */
 
@@ -1172,7 +1172,7 @@ body.wide-stage .app { max-width: 1120px; }
 
 /* Optical centre: the header is taller than the credit line, so true centring looks low. A small lift (it moves nothing else, and the
    chat screen, which fills the window, is left alone). */
-.screen-root > *:not(.avatar-stage) { transform: translateY(-4.5vh); }
+.screen-root > *:not(.avatar-stage):not(.orbit-card) { transform: translateY(-4.5vh); }
 
 /* side-by-side layout: the avatar may use more of the window height */
 body.wide-stage .avatar-stage .avatar-figure.mesh { width: min(400px, 50vh); height: min(400px, 50vh); }
@@ -1184,3 +1184,28 @@ body.wide-stage .credit { margin-top: 0.9rem; }
 
 /* side-by-side layout: no reserved blank line under the title */
 body.wide-stage .subtitle:empty { display: none; }
+
+
+/* Face scan, side by side: camera and pose grid on the left; hints, face map, live text and buttons on the right. Same frame as the chat. */
+body:has(.orbit-card) .app { max-width: 1120px; padding-top: 1.1rem; padding-bottom: 1.1rem; }
+body:has(.orbit-card) .screen-root { margin-top: 0.25rem; }
+body:has(.orbit-card) .credit { margin-top: 0.9rem; }
+body:has(.orbit-card) .subtitle:empty { display: none; }
+body.cinematic .orbit-card.face-scan-card { background: var(--surface); border: 1px solid var(--border); padding: 1.1rem 1.5rem 1.25rem; max-width: none; margin: 0; width: 100%; box-sizing: border-box; }
+.orbit-card h2 { margin: 0 0 0.6rem; }
+.orbit-card .scan-cols { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 1.5rem; align-items: start; }
+.orbit-card .scan-left { display: flex; flex-direction: column; align-items: center; min-width: 0; }
+.orbit-card .scan-right { display: flex; flex-direction: column; min-width: 0; }
+.orbit-card .scan-mid { display: grid; grid-template-columns: 210px 1fr; gap: 1rem; align-items: start; margin-top: 0.4rem; }
+.orbit-card .scan-texts { min-width: 0; }
+.orbit-card .scan-hint { height: calc(2 * 1.45em); }
+.orbit-card .orbit-tip { height: calc(2 * 1.4em + 1rem); }
+.orbit-card .scan-live { height: calc(4 * 1.35em); margin-top: 0; }
+.orbit-card .orbit-quality { height: calc(4 * 1.35em); }
+.orbit-card .scan-buttons { margin-top: 0.5rem; }
+.orbit-card .scan-buttons > button { padding-left: 0.6rem; padding-right: 0.6rem; font-size: 0.92rem; }
+@media (max-width: 900px) {
+  body:has(.orbit-card) .app { max-width: 720px; }
+  .orbit-card .scan-cols { grid-template-columns: 1fr; }
+  .orbit-card .scan-mid { grid-template-columns: 1fr; }
+}
