@@ -250,7 +250,6 @@ function renderUpdateAvatarScreen() {
   root.innerHTML = `
     <section class="card">
       <h2>Update Your Avatar</h2>
-      <p class="step-copy" style="text-align:left;">Each step saves when you finish it.</p>
       <div class="update-menu">
         <button type="button" class="update-menu-item" id="upd-scan">
           <span class="update-menu-title">Face Scan</span>
