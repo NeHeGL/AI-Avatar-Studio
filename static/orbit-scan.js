@@ -11,6 +11,7 @@ import { estimateHeadPose, scoreCapture } from "/static/face-pose.js?v=25";
 const CAPTURE_PX = 640;
 const SCAN_WIDE = 1.5; // saved scan photos include hair, ears and neck around the on-screen circle
 const FRONTAL_PX = 1024;
+const FACE_PX_GOOD = 300; // the saved photos are cropped and enlarged around your face, so what counts is how many camera pixels it covers, not how big it looks
 const BASELINE_FRAMES = 20;
 const CAPTURE_INTERVAL_MS = 110;
 const FRONTAL_INDEX = 100; // hero photo slot; grid cells use 0..44
@@ -266,10 +267,10 @@ export async function runFaceScan(root, canonicalName, api) {
     const worst = Math.min(size, stab, centre);
     let advice = "";
     if (worst >= 0.85) advice = "Photo quality is good.";
-    else if (worst === size) advice = `Move closer.`;
+    else if (worst === size) advice = `Move a little closer, or sit in better light so the camera keeps detail.`;
     else if (worst === stab) advice = "Hold still for half a second at each position; moving blurs the photo.";
     else advice = "Keep your face in the middle of the camera view.";
-    return `Photo quality right now — face size ${pct(faceW)}% of the picture height (aim for 50%) · steadiness ${pct(stab)}% · centring ${pct(centre)}%. ${advice}\n${toneReport()}`;
+    return `Photo quality right now — face width ${Math.round(faceW)} px (${FACE_PX_GOOD} px or more is plenty) · steadiness ${pct(stab)}% · centring ${pct(centre)}%. ${advice}\n${toneReport()}`;
   }
 
   function refresh() {
@@ -1432,9 +1433,9 @@ export async function runFaceScan(root, canonicalName, api) {
     {
       // the photo-quality text describes the live picture, so it moves as you move closer, hold still or re-centre
       const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
-      const ff = (box.w * vw) / Math.min(vw, vh);
+      const ff = box.w * vw; // the face's width in camera pixels
       liveParts = {
-        size: Math.min(1, ff / 0.5),
+        size: Math.min(1, ff / FACE_PX_GOOD),
         stab: 1 - Math.min(1, (framing?.getJitter?.() ?? 0) * 3.2),
         centre: Math.max(0, Math.min(1, 1 - Math.hypot(1 - box.cx - 0.5, box.cy - 0.5) * 1.4)),
         faceW: ff,
@@ -1480,8 +1481,8 @@ export async function runFaceScan(root, canonicalName, api) {
       lastCaptureAt = now;
       const vw0 = video.videoWidth || 1280;
       const vh0 = video.videoHeight || 720;
-      const faceFrac = (box.w * vw0) / Math.min(vw0, vh0); // face width as a share of the picture's short side
-      const sizePart = Math.min(1, faceFrac / 0.5); // a face about half the picture height is plenty
+      const faceFrac = box.w * vw0; // the face's width in camera pixels
+      const sizePart = Math.min(1, faceFrac / FACE_PX_GOOD); // this many pixels is plenty of detail
       const stabPart = 1 - Math.min(1, jitter * 3.2);
       const centrePart = Math.max(0, Math.min(1, 1 - Math.hypot(1 - box.cx - 0.5, box.cy - 0.5) * 1.4));
       const q = Math.max(0.05, (0.34 * centrePart + 0.4 * sizePart + 0.26 * stabPart) * (1 - 0.25 * Math.min(1, dist)));
