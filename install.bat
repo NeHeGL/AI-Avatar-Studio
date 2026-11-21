@@ -1,11 +1,11 @@
 @echo off
 setlocal
-title Avatar AI Studio - Installer
+title AI Avatar Studio - Installer
 cd /d "%~dp0"
 
 echo.
 echo  ============================================================
-echo   Avatar AI Studio - Installer
+echo   AI Avatar Studio - Installer
 echo  ============================================================
 echo.
 
@@ -64,8 +64,8 @@ if errorlevel 1 ( echo  [ERROR] Some downloads failed. Run install.bat again to 
 echo.
 echo  ============================================================
 echo   Installation complete!
-echo   Start with:  "Start Avatar AI Studio App.bat"  (own window)
-echo           or:  "Start Avatar AI Studio Web.bat"  (browser tab)
+echo   Start with:  "Start AI Avatar Studio App.bat"  (own window)
+echo           or:  "Start AI Avatar Studio Web.bat"  (browser tab)
 echo  ============================================================
 echo.
 if not defined AVATAR_AUTO_INSTALL pause

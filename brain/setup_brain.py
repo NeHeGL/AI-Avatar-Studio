@@ -60,7 +60,7 @@ def main(cb=None) -> int:
         fetch(MODEL_URL, target, cb)
     else:
         print("A model is already in brain/models.")
-    print(f"\nChat brain ready ({hardware.tier()['brain_size'].upper()} model for a {hardware.tier()['vram_gb']} GB card). Start Avatar AI Studio as usual.")
+    print(f"\nChat brain ready ({hardware.tier()['brain_size'].upper()} model for a {hardware.tier()['vram_gb']} GB card). Start AI Avatar Studio as usual.")
     return 0
 
 

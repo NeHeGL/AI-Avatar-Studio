@@ -756,7 +756,7 @@ async function waitForStartup() {
   setPhaseLabels(phaseLabel, statusHint, "", "");
   root.innerHTML = `
     <div class="startup-card">
-      <p class="startup-title">Starting Avatar AI Studio</p>
+      <p class="startup-title">Starting AI Avatar Studio</p>
       <p class="startup-blurb">The chat brain is a large, complex AI language model, so the very first start can take a few minutes while it downloads. After that it starts in under a minute.</p>
       ${STARTUP_ROWS.map(
         ([k, label, what, real]) => (real = r?.names?.[k] || real) && `

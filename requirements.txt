@@ -1,4 +1,4 @@
-# Avatar AI Studio app environment (ml/.venv). install.bat installs PyTorch first (CUDA build), then this file,
+# AI Avatar Studio app environment (ml/.venv). install.bat installs PyTorch first (CUDA build), then this file,
 # then chatterbox-tts with --no-deps (it pins an old torch that this app does not use).
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
