@@ -84,8 +84,8 @@ export async function runPhotoStep(root, canonicalName, api) {
       ${gallery}
       <p class="photo-label">${photos.length ? `You can have up to ${MAX_PHOTOS} avatar photos per profile. You can delete a photo by clicking the <span class="photo-x" aria-label="X"></span>.` : "Add a photo of your face"}</p>
       <div class="photo-options${photos.length >= MAX_PHOTOS ? " full" : ""}">
-        <button type="button" class="photo-option" id="ph-cam"><strong>Use your webcam</strong><span>Look at the camera. It takes the pictures by itself when you are looking straight ahead, eyes open and in focus, and keeps the best.</span></button>
-        <button type="button" class="photo-option" id="ph-up"><strong>Upload a photo</strong><span>Choose a picture of your face, or drop one here. It is centred, zoomed and cropped for you.</span></button>
+        <button type="button" class="photo-option" id="ph-cam"${photos.length >= MAX_PHOTOS ? " disabled" : ""}><strong>Use your webcam</strong><span>Look at the camera. It takes the pictures by itself when you are looking straight ahead, eyes open and in focus, and keeps the best.</span></button>
+        <button type="button" class="photo-option" id="ph-up"${photos.length >= MAX_PHOTOS ? " disabled" : ""}><strong>Upload a photo</strong><span>Choose a picture of your face, or drop one here. It is centred, zoomed and cropped for you.</span></button>
       </div>
       <input type="file" id="ph-file" accept="image/*" hidden />
       <div class="step-actions step-actions--row"><button type="button" class="btn-ghost" id="ph-cancel">${photos.length ? "Done" : "Cancel"}</button></div>`);
