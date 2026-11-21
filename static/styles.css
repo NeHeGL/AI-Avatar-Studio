@@ -1172,7 +1172,7 @@ body.wide-stage .app { max-width: 1120px; }
 
 /* Optical centre: the header is taller than the credit line, so true centring looks low. A small lift (it moves nothing else, and the
    chat screen, which fills the window, is left alone). */
-.screen-root > *:not(.avatar-stage):not(.orbit-card):not(.photo-card) { transform: translateY(-4.5vh); }
+.screen-root > *:not(.avatar-stage):not(.orbit-card):not(.photo-card) { transform: none; } /* no optical lift: every screen sits exactly where the chat screen does */
 
 /* side-by-side layout: the avatar may use more of the window height */
 body.wide-stage .avatar-stage .avatar-figure.mesh { width: min(400px, 50vh); height: min(400px, 50vh); }
@@ -1317,3 +1317,21 @@ body.wide-stage .avatar-stage { box-sizing: border-box; min-height: var(--stage-
 body.wide-stage .photo-card { box-sizing: border-box; height: var(--stage-h); overflow: hidden; display: flex; flex-direction: column; padding: 1.25rem 1.5rem; }
 body.wide-stage .photo-card > .photo-label:first-of-type { margin-top: 0; }
 .photo-card { --thumb: 160px; }
+
+/* ===== One frame for EVERY screen: the same title and corner-text positions, and a card of the same size in the same place. ===== */
+body .app { max-width: 1120px; padding-top: 1.1rem; padding-bottom: 1.1rem; }
+body .screen-root { margin-top: 0.25rem; }
+body .credit { margin-top: 0.9rem; }
+body .subtitle:empty { display: none; }
+.screen-root > * { transform: none; }
+.screen-root > .card:not(.avatar-stage):not(.photo-card),
+.screen-root > .step-card,
+.screen-root > .startup-card {
+  box-sizing: border-box; width: 100%; max-width: none; margin: 0;
+  height: var(--stage-h); padding: 1.25rem 1.5rem;
+  display: flex; flex-direction: column; justify-content: center; overflow: auto;
+}
+/* the content of these simple screens stays a comfortable reading width, centred in the big card */
+.screen-root > .card:not(.avatar-stage):not(.photo-card) > *,
+.screen-root > .step-card > *,
+.screen-root > .startup-card > * { width: 100%; max-width: 640px; margin-left: auto; margin-right: auto; box-sizing: border-box; }
