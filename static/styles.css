@@ -1297,3 +1297,6 @@ body:has(.photo-card) .app { max-width: 1120px; }
 .photo-stage { position: absolute; inset: 0; overflow: hidden; transform: scaleX(-1); }
 .photo-stage video { position: absolute; left: 0; top: 0; max-width: none; width: auto; height: auto; object-fit: fill; transform-origin: 0 0; transform: none; }
 .photo-oval, .photo-flash { display: none; }
+/* the picture beside the text is sized from the window height, so the screen never needs a scrollbar */
+.photo-cam, .photo-review { grid-template-columns: clamp(240px, calc(100vh - 330px), 440px) 1fr; }
+@media (max-width: 900px) { .photo-cam, .photo-review { grid-template-columns: 1fr; } }
