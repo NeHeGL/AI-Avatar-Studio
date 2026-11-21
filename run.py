@@ -15,6 +15,6 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
     except Exception as exc:
-        print(f"\nFailed to start Avatar Studio:\n  {exc}\n")
+        print(f"\nFailed to start Avatar AI Studio:\n  {exc}\n")
         input("Press Enter to close…")
         raise SystemExit(1) from exc

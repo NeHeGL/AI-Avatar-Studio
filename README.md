@@ -1,14 +1,14 @@
-# Avatar Studio
+# Avatar AI Studio
 
 Make a talking avatar of a person from a few photos and a voice sample, then chat with it by voice. Everything runs on your own PC.
 
 ## Install and run
 
 1. Install Python 3.11 (tick "Add Python to PATH").
-2. Double-click **Start Avatar Studio App.bat** (own window) or **Start Avatar Studio Web.bat** (browser tab).
+2. Double-click **Start Avatar AI Studio App.bat** (own window) or **Start Avatar AI Studio Web.bat** (browser tab).
    If anything is missing, the first launch runs **install.bat** for you. It sets up the Python environments, the chat brain and the video renderer (about 14 GB, one time).
 
-**Stop Avatar Studio.bat** closes everything. **Build Standalone.bat** makes the release zip in `dist/`.
+**Stop Avatar AI Studio.bat** closes everything. **Build Standalone.bat** makes the release zip in `dist/`.
 
 ## Needs
 

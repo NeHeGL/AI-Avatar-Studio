@@ -1,4 +1,4 @@
-"""Start Avatar Studio as ONE thing.
+"""Start Avatar AI Studio as ONE thing.
 
 The studio is three programs, each in its own Python environment (they use different libraries, so they cannot share one process):
   - the app           http://localhost:8765  (this process: pages, chat, voice)
@@ -154,7 +154,7 @@ def _clear_temp_renders() -> None:
 
 if __name__ == "__main__":
     _clear_temp_renders()
-    print("Avatar Studio: starting the live face and the video renderer in the background...")
+    print("Avatar AI Studio: starting the live face and the video renderer in the background...")
     for name, exe, script, log, needs in CHILDREN:
         _procs[name] = _start(name, exe, script, log, needs)
     threading.Thread(target=_watch, daemon=True).start()
@@ -168,7 +168,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
     except Exception as exc:
-        print(f"\nFailed to start Avatar Studio:\n  {exc}\n")
+        print(f"\nFailed to start Avatar AI Studio:\n  {exc}\n")
         input("Press Enter to close...")
         raise SystemExit(1) from exc
     finally:

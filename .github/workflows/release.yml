@@ -57,15 +57,15 @@ jobs:
         with:
           tag_name: ${{ inputs.version }}
           target_commitish: ${{ github.sha }}
-          name: "Avatar Studio ${{ inputs.version }}"
+          name: "Avatar AI Studio ${{ inputs.version }}"
           files: dist/Avatar-Studio-*.zip
           body: |
-            ## Avatar Studio ${{ inputs.version }}
+            ## Avatar AI Studio ${{ inputs.version }}
 
             ### Install
             1. Download **Avatar-Studio-${{ inputs.version }}.zip** below (not the automatic "Source code" files)
             2. Extract it anywhere
-            3. Double-click `Start Avatar Studio App.bat` (own window) or `Start Avatar Studio Web.bat` (browser tab).
+            3. Double-click `Start Avatar AI Studio App.bat` (own window) or `Start Avatar AI Studio Web.bat` (browser tab).
                The first launch runs `install.bat`, which downloads and sets up everything.
 
             ### Requirements
