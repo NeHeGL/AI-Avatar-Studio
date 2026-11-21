@@ -189,6 +189,17 @@ def delete_profile(canonical_name: str) -> dict:
 
 def save_onboarding(canonical_name: str) -> dict:
     if not load_draft(canonical_name):
+        # Nothing was changed since the last save. NEVER make a blank draft and commit it: that replaced a person's whole saved profile
+        # (photos, voice and Knowledge) with an empty one every time this ran for someone who already had a saved profile.
+        existing = find_by_display_or_canonical(canonical_name)
+        if existing:
+            existing = reconcile_profile(existing)
+            return {
+                "status": "avatar",
+                "message": "Profile saved.",
+                "profile": profile_summary(existing),
+                "avatar_mode": "live" if existing.avatar_ready else "placeholder",
+            }
         get_or_create_draft(canonical_name)
     profile = commit_draft(canonical_name)
     if not profile:
