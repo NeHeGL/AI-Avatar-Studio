@@ -142,6 +142,7 @@ class OtherBody(BaseModel):
     canonical_name: str
     display_name: str = ""
     notes: str = ""
+    clear: bool = False  # only the Knowledge editor sets this, when the person really emptied the notes
 
 
 @app.on_event("startup")
@@ -272,7 +273,7 @@ def api_voice(body: VoiceBody) -> dict:
 
 @app.post("/api/capture/other")
 def api_other(body: OtherBody) -> dict:
-    return capture.ingest_other(body.canonical_name, body.display_name, body.notes)
+    return capture.ingest_other(body.canonical_name, body.display_name, body.notes, body.clear)
 
 
 class ReplyDoneBody(BaseModel):

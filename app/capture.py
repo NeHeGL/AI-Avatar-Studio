@@ -227,10 +227,11 @@ def ingest_voice(canonical_name: str, audio_base64: str, label: str) -> dict:
     return {"status": "ok", "profile": profile_summary(profile)}
 
 
-def ingest_other(canonical_name: str, display_name: str, notes: str) -> dict:
+def ingest_other(canonical_name: str, display_name: str, notes: str, force_clear: bool = False) -> dict:
     profile = get_working_profile(canonical_name)
     profile.other.display_name = display_name.strip() or profile.display_name
-    profile.other.notes = notes.strip()
+    if notes.strip() or not (profile.other.notes or "").strip() or force_clear:
+        profile.other.notes = notes.strip()  # an empty note never silently replaces existing Knowledge
     profile = reconcile_profile(profile)
     profile.touch()
     save_draft(profile)

@@ -396,6 +396,7 @@ async function openOtherEditor() {
         canonical_name: state.canonicalName,
         display_name: document.getElementById("other-display").value,
         notes: document.getElementById("other-notes").value,
+        clear: true, // the editor is where the person chooses what the notes say, including nothing
       });
       state.profile = result.profile;
       resolve(true);
@@ -760,7 +761,7 @@ import {
   runSetupPipeline,
   setCinematicMode,
   setPhaseLabels,
-} from "/static/onboarding-flow.js?v=19";
+} from "/static/onboarding-flow.js?v=20";
 
 /** Startup screen: the chat brain, ears, speech engine and video animation load once, here, so everything is ready when a person is picked. */
 const STARTUP_ROWS = [
