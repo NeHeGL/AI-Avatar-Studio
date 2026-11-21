@@ -35,7 +35,7 @@ def _open_app_window(url: str) -> bool:
     cands = [os.path.join(r, rel) for rel in rels for r in roots if r] + [shutil.which("msedge") or "", shutil.which("chrome") or ""]
     for exe in cands:
         if exe and os.path.exists(exe):
-            subprocess.Popen([exe, f"--app={url}", "--window-size=1120,740"])  # tall and narrow: the page is a single column
+            subprocess.Popen([exe, f"--app={url}", "--window-size=1120,720"])  # tall and narrow: the page is a single column
             return True
     return False
 

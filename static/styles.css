@@ -1181,3 +1181,6 @@ body.wide-stage .avatar-stage .avatar-figure.mesh { width: min(400px, 50vh); hei
 body.wide-stage .app { padding-top: 1.1rem; padding-bottom: 1.1rem; }
 body.wide-stage .screen-root { margin-top: 0.25rem; }
 body.wide-stage .credit { margin-top: 0.9rem; }
+
+/* side-by-side layout: no reserved blank line under the title */
+body.wide-stage .subtitle:empty { display: none; }
