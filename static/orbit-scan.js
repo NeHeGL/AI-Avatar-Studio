@@ -1387,11 +1387,15 @@ export async function runFaceScan(root, canonicalName, api) {
     const pitch = (flipPitch ? -1 : 1) * (rawPitch - baseline.pitch);
     pose = { yaw, pitch };
     // Learn the reachable range (ignore tracker glitches).
-    if (Math.abs(yaw) < 70) reach.yaw = Math.max(reach.yaw, Math.abs(yaw));
+    if (Math.abs(yaw) < 70) {
+      reach.yaw = Math.max(reach.yaw, Math.abs(yaw));
+      if (yaw > 0) reach.right = Math.max(reach.right || 0, yaw);
+      else reach.left = Math.max(reach.left || 0, -yaw);
+    }
     if (pitch > 0 && pitch < 45) reach.up = Math.max(reach.up, pitch);
     if (pitch < 0 && pitch > -45) reach.down = Math.max(reach.down, -pitch);
     const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-    const yawS = yaw * (36 / clampN(reach.yaw * 0.75, 12, 36));
+    const yawS = yaw * (36 / clampN((yaw >= 0 ? reach.right || reach.yaw : reach.left || reach.yaw) * 0.75, 12, 36)); // each side scaled to how far YOU turn that way
     const pitchS = pitch >= 0 ? pitch * (16 / clampN(reach.up * 0.7, 4, 16)) : pitch * (16 / clampN(reach.down * 0.7, 4, 16));
     const { index, dist } = nearestCell(yawS, pitchS);
     activeCell = index;
@@ -1457,9 +1461,13 @@ export async function runFaceScan(root, canonicalName, api) {
   }
 
   let resolveScan = null;
+  const onHeaderCancel = (e) => { e.preventDefault(); completeAndExit(null); };
   function completeAndExit(value) {
     if (settled) return;
     settled = true;
+    document.removeEventListener("header-cancel", onHeaderCancel);
+    const hb = document.getElementById("logout-btn");
+    if (hb) hb.textContent = "Change profile";
     if (previewTimer) clearInterval(previewTimer);
     stopCamera();
     resolveScan?.(value);
@@ -1569,6 +1577,9 @@ export async function runFaceScan(root, canonicalName, api) {
     root.appendChild(wrap);
     resolveScan = resolve;
     btnCancel.onclick = () => completeAndExit(null);
+    document.addEventListener("header-cancel", onHeaderCancel);
+    const hb = document.getElementById("logout-btn");
+    if (hb) hb.textContent = "Cancel";
     btnDone.onclick = () => void finishScan();
     wrap.querySelector("#flip-yaw").onclick = () => {
       flipYaw = !flipYaw;
