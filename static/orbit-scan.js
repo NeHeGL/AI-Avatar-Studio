@@ -304,8 +304,8 @@ export async function runFaceScan(root, canonicalName, api) {
     else if (!baseline.ready) hint.textContent = "Look straight at the camera and hold still for a moment…";
     else if (acc < DONE_AT)
       hint.textContent = "Sit close (your face should fill about half the view), keep even light on your face, and move your head slowly — pausing half a second at each extreme.";
-    else if (acc < 85) hint.textContent = "Good. Keep moving to fill the remaining dots, or tap Save.";
-    else hint.textContent = "Excellent coverage — tap Save.";
+    else if (acc < 85) hint.textContent = "Good. Keep moving to fill the remaining dots.";
+    else hint.textContent = "Excellent coverage.";
     return acc;
   }
 
