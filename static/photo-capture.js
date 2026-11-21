@@ -8,6 +8,7 @@
 const MP = "/static/vendor/mediapipe";
 const MAX_SNAPS = 6;
 const SNAP_GAP_MS = 700;
+const TARGET_FACE_PX = 280; // what the zoom aims for
 const MIN_FACE_PX = 170; // forehead to chin, in camera pixels: about what you get sitting normally at a desk (the server accepts 120+ and prefers 200+)
 const GOOD_FRAMES = 3; // checks must hold this many frames in a row before a picture is taken
 const GIVE_UP_HINT_MS = 30000;
@@ -223,13 +224,28 @@ export async function runPhotoStep(root, canonicalName, api) {
     wrap.querySelector("#ph-cancel").onclick = choose;
 
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 3840 }, height: { ideal: 2160 } }, audio: false });
     } catch {
       status.textContent = "The camera is blocked or not available. Allow camera access, or upload a photo instead.";
       return;
     }
     video.srcObject = stream;
     await video.play().catch(() => {});
+    // Cameras that can zoom (many webcams can) are zoomed in for you, so you do not have to lean toward the screen.
+    const track = stream.getVideoTracks()[0];
+    const zoomCap = track?.getCapabilities?.().zoom || null;
+    let zoom = zoomCap ? zoomCap.min : 1;
+    let lastZoomAt = 0;
+    function autoZoom(fhPx, vh) {
+      if (!zoomCap || performance.now() - lastZoomAt < 700) return;
+      const want = fhPx < TARGET_FACE_PX * 0.85 ? 1.12 : fhPx > TARGET_FACE_PX * 1.6 || (fhPx > 0.62 * vh) ? 1 / 1.12 : 1;
+      if (want === 1) return;
+      const next = Math.max(zoomCap.min, Math.min(zoomCap.max, zoom * want));
+      if (Math.abs(next - zoom) < 1e-3) return;
+      zoom = next;
+      lastZoomAt = performance.now();
+      track.applyConstraints({ advanced: [{ zoom }] }).catch(() => {});
+    }
     try {
       landmarker = await loadTracker((m) => (status.textContent = m));
     } catch (e) {
@@ -335,6 +351,7 @@ export async function runPhotoStep(root, canonicalName, api) {
       const fhPx = (chin - top) * vh;
       const cx = (lm[234].x + lm[454].x) / 2;
       const cy = (top + chin) / 2;
+      autoZoom(fhPx, vh);
       st.size = fhPx >= MIN_FACE_PX && chin - top <= 0.8;
       const inside = Math.min(...lm.map((p) => p.x)) > 0.02 && Math.max(...lm.map((p) => p.x)) < 0.98 && top > 0.02 && chin < 0.98;
       st.centre = Math.abs(cx - 0.5) < 0.12 && Math.abs(cy - 0.5) < 0.15 && inside;
