@@ -283,7 +283,7 @@ async function runUpdateSection(section) {
     const result = await runFaceScan(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if (section === "voice") {
-    const { runVoiceCapture } = await import("/static/voice-capture.js?v=4");
+    const { runVoiceCapture } = await import("/static/voice-capture.js?v=5");
     const result = await runVoiceCapture(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if ((await openOtherEditor()) === false) {
@@ -387,6 +387,10 @@ async function openOtherEditor() {
       </div>
     </section>`;
   return new Promise((resolve) => {
+    const hb = document.getElementById("logout-btn");
+    if (hb) hb.style.display = "none"; // this screen has its own Cancel and Save
+    const done = resolve;
+    resolve = (v) => { if (hb) hb.style.display = ""; done(v); };
     document.getElementById("other-cancel").onclick = () => resolve(false); // leave without changing anything
     document.getElementById("other-save").onclick = async () => {
       const result = await api("/api/capture/other", {
@@ -673,7 +677,7 @@ async function runScanFlow() {
 }
 
 async function runVoiceFlow() {
-  const { runVoiceCapture } = await import("/static/voice-capture.js?v=4");
+  const { runVoiceCapture } = await import("/static/voice-capture.js?v=5");
   const result = await runVoiceCapture(root, state.canonicalName, api);
   if (result?.profile) {
     state.profile = result.profile;

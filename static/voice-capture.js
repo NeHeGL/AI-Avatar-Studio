@@ -17,9 +17,9 @@ export async function runVoiceCapture(root, canonicalName, api) {
     <p id="voice-status" class="voice-status">Microphone not started yet.</p>
     <audio id="voice-playback" controls class="hidden"></audio>
     <div class="step-actions step-actions--row">
-      <button type="button" class="btn-ghost" id="voice-cancel">Back</button>
+      <button type="button" class="btn-ghost" id="voice-cancel">Cancel</button>
       <button type="button" class="btn-primary" id="voice-record">Record</button>
-      <button type="button" class="btn-primary hidden" id="voice-save" disabled>Continue</button>
+      <button type="button" class="btn-primary hidden" id="voice-save" disabled>Save</button>
     </div>
   `;
 
@@ -68,6 +68,10 @@ export async function runVoiceCapture(root, canonicalName, api) {
   }
 
   return new Promise((resolve) => {
+    const hb = document.getElementById("logout-btn");
+    if (hb) hb.style.display = "none"; // this screen has its own Cancel and Save
+    const done = resolve;
+    resolve = (v) => { if (hb) hb.style.display = ""; done(v); };
     root.innerHTML = "";
     root.appendChild(wrap);
 
