@@ -278,7 +278,7 @@ function renderUpdateAvatarScreen() {
 async function runUpdateSection(section) {
   setCinematicMode(true);
   if (section === "scan") {
-    const { runPhotoStep } = await import("/static/photo-capture.js?v=13");
+    const { runPhotoStep } = await import("/static/photo-capture.js?v=14");
     const result = await runPhotoStep(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if (section === "voice") {
@@ -664,7 +664,7 @@ function renderNewUserFlow() {
 }
 
 async function runScanFlow() {
-  const { runPhotoStep } = await import("/static/photo-capture.js?v=13");
+  const { runPhotoStep } = await import("/static/photo-capture.js?v=14");
   const result = await runPhotoStep(root, state.canonicalName, api);
   if (result?.profile) {
     state.profile = result.profile;
@@ -760,7 +760,7 @@ import {
   runSetupPipeline,
   setCinematicMode,
   setPhaseLabels,
-} from "/static/onboarding-flow.js?v=18";
+} from "/static/onboarding-flow.js?v=19";
 
 /** Startup screen: the chat brain, ears, speech engine and video animation load once, here, so everything is ready when a person is picked. */
 const STARTUP_ROWS = [
