@@ -1300,3 +1300,8 @@ body:has(.photo-card) .app { max-width: 1120px; }
 /* the picture beside the text is sized from the window height, so the screen never needs a scrollbar */
 .photo-cam, .photo-review { grid-template-columns: clamp(240px, calc(100vh - 330px), 440px) 1fr; }
 @media (max-width: 900px) { .photo-cam, .photo-review { grid-template-columns: 1fr; } }
+
+/* all the photos on ONE row, as large as fit: each is at most --thumb wide and they shrink together when there are many */
+.photo-card { --thumb: 150px; }
+.photo-gallery { display: grid; grid-template-columns: repeat(var(--n, 1), minmax(0, var(--thumb))); gap: 12px; justify-content: start; flex-wrap: nowrap; }
+.photo-thumb { width: 100%; height: auto; aspect-ratio: 1; }

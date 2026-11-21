@@ -68,7 +68,7 @@ export async function runPhotoStep(root, canonicalName, api) {
     } catch { /* no gallery */ }
     const gallery = photos.length
       ? `<p class="photo-label">Your photos. Click one to use it for your avatar.</p>
-         <div class="photo-gallery">${photos
+         <div class="photo-gallery" style="--n:${photos.length}">${photos
            .map(
              (p) => `<div class="photo-thumb${p.active ? " active" : ""}" data-name="${esc(p.name)}" title="${p.active ? "In use" : "Use this photo"}">
                <img src="${esc(p.url)}" alt="Your photo" />${p.active ? '<span class="photo-tag">In use</span>' : ""}<button type="button" class="photo-del" data-del="${esc(p.name)}" title="Delete this photo"></button>
