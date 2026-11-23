@@ -79,7 +79,8 @@ def uv_exe() -> str:
 
 
 def run(cmd: list[str], cwd: Path, what: str) -> None:
-    rc = subprocess.run(cmd, cwd=cwd).returncode
+    # UV_LINK_MODE=copy: the package cache is usually on another drive than the install, where uv cannot link files and would print a warning
+    rc = subprocess.run(cmd, cwd=cwd, env=dict(os.environ, UV_LINK_MODE="copy")).returncode
     if rc != 0:
         raise SystemExit(f"\n[ERROR] {what} failed (code {rc}). Check your internet connection and try again; it picks up where it left off.")
 
