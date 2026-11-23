@@ -39,12 +39,14 @@ Windows 10/11, an NVIDIA card (RTX 20-series or newer), and about 30 GB of free 
 
 ## Install and run
 
-1. Download **AI-Avatar-Studio.exe** from the latest [Release](../../releases) and put it in the folder, or on the drive, where you want the app and its downloads to live (about 30 GB).
-2. Double-click it. The first run unpacks the app into an `AI Avatar Studio` folder beside it, installs Python and the packages itself (you do not need to install Python), and starts the app. The chat model, video engine and voice (about 22 GB) download with progress on the app's start screen. After that it starts straight away.
+1. Download the `.zip` from the latest [Release](../../releases) and extract it into the folder, or onto the drive, where you want the app and its downloads to live (about 30 GB).
+2. Run **AI-Avatar-Studio.exe**. The first run unpacks the app into an `AI Avatar Studio` folder beside it, installs Python and the packages itself (you do not need to install Python), and starts the app. The chat model, video engine and voice (about 22 GB) download with progress on the app's start screen. After that it starts straight away.
 
 Windows may warn about an unknown publisher, because the program is not signed: choose **More info**, then **Run anyway**.
 
 ### Running from the source code
+
+The source is this repository (**Code**, then **Download ZIP**, or `git clone`).
 
 Install Python 3.11 (tick "Add Python to PATH"), then double-click **Start AI Avatar Studio App.bat** (own window) or **Start AI Avatar Studio Web.bat** (browser tab). If anything is missing, the first launch runs **install.bat** for you. **Stop AI Avatar Studio.bat** closes everything. **Build Standalone.bat** builds the release files (`AI-Avatar-Studio.exe` and `README.md`) into `dist/`; it needs [uv](https://docs.astral.sh/uv/).
 

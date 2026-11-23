@@ -1,9 +1,9 @@
 name: Release
 
 # Run by hand: Actions > Release > Run workflow, and type the version (e.g. v1.0.0).
-# It builds "AI-Avatar-Studio.exe" with build_standalone.py (on Windows: a Windows .exe can only be built on Windows) and publishes it,
-# together with README.md, as a GitHub Release.
-# "dry run" builds the files and attaches them to the run, without tagging or publishing anything.
+# It builds the .exe with build_standalone.py (on Windows: a Windows .exe can only be built on Windows) and publishes one zip, holding
+# AI-Avatar-Studio.exe and README.md, as a GitHub Release. The source code is the repository itself.
+# "dry run" builds the zip and attaches it to the run, without tagging or publishing anything.
 
 on:
   workflow_dispatch:
@@ -45,14 +45,12 @@ jobs:
         shell: bash
         run: uv run --no-project --python 3.11 build_standalone.py "$VER"
 
-      - name: Dry run - attach the files to this run
+      - name: Dry run - attach the zip to this run
         if: ${{ inputs.dry_run }}
         uses: actions/upload-artifact@v4
         with:
           name: dry-run-${{ inputs.version }}
-          path: |
-            dist/AI-Avatar-Studio.exe
-            dist/README.md
+          path: dist/AI-Avatar-Studio-*-windows-x64.zip
 
       - name: Create the tag and the GitHub Release
         if: ${{ !inputs.dry_run }}
@@ -61,16 +59,14 @@ jobs:
           tag_name: ${{ inputs.version }}
           target_commitish: ${{ github.sha }}
           name: "AI Avatar Studio ${{ inputs.version }}"
-          files: |
-            dist/AI-Avatar-Studio.exe
-            dist/README.md
+          files: dist/AI-Avatar-Studio-*-windows-x64.zip
           body: |
             ## AI Avatar Studio ${{ inputs.version }}
 
-            ### Install
-            1. Download **AI-Avatar-Studio.exe** below (not the automatic "Source code" files)
-            2. Put it in the folder, or on the drive, where you want the app and its downloads to live (about 30 GB)
-            3. Double-click it. The first run unpacks the app beside it, installs Python and the packages, and starts the app; the chat model, video engine and voice (about 22 GB) download with progress on the start screen. After that it starts straight away.
+            ### Installation
+            1. Download `AI-Avatar-Studio-${{ inputs.version }}-windows-x64.zip` (not the automatic "Source code" files)
+            2. Extract it into the folder, or onto the drive, where you want the app and its downloads to live (about 30 GB)
+            3. Run `AI-Avatar-Studio.exe`. The first run unpacks the app beside it, installs Python and the packages, and starts the app; the chat model, video engine and voice (about 22 GB) download with progress on the start screen. After that it starts straight away.
 
             Windows may warn about an unknown publisher because the program is not signed: choose **More info**, then **Run anyway**.
 

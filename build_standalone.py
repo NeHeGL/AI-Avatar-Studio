@@ -1,11 +1,11 @@
-"""Build the release: dist/AI-Avatar-Studio.exe and dist/README.md (the two files a GitHub release carries).
+"""Build the release: dist/AI-Avatar-Studio-<version>-windows-x64.zip, holding AI-Avatar-Studio.exe and README.md (the one file a GitHub release carries).
 
   python build_standalone.py [version]        (or double-click "Build Standalone.bat")
 
 The .exe is launcher.py packed with PyInstaller. Inside it: the app's own files (payload.zip) and the `uv` tool, which sets up Python 3.11 and the
 packages on first run. It holds none of your people, chats, voice samples or logs, and none of the large downloads (the Python packages, about
 3 GB of PyTorch, and the chat model, video engine and voice, about 22 GB): those are fetched when it is first run.
-The GitHub "Release" workflow runs this and attaches both files to the release. Needs `uv` (https://docs.astral.sh/uv/) on the PATH.
+The GitHub "Release" workflow runs this and attaches the zip to the release (the source code is the repository itself). Needs `uv` (https://docs.astral.sh/uv/) on the PATH.
 """
 from __future__ import annotations
 
@@ -63,7 +63,11 @@ def main() -> int:
         return 1
     shutil.copyfile(ROOT / "README.md", DIST / "README.md")
     exe = DIST / f"{NAME}.exe"
-    print(f"\nBuilt {exe} ({exe.stat().st_size / 1e6:.1f} MB) and {DIST / 'README.md'}")
+    zip_path = DIST / f"{NAME}-{version}-windows-x64.zip"  # what the GitHub release carries: the .exe and the README, in one zip
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.write(exe, exe.name)
+        z.write(DIST / "README.md", "README.md")
+    print(f"\nBuilt {zip_path} ({zip_path.stat().st_size / 1e6:.1f} MB), holding {exe.name} ({exe.stat().st_size / 1e6:.1f} MB) and README.md")
     return 0
 
 
