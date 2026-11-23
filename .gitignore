@@ -33,3 +33,21 @@ data/profiles/*
 *.gguf
 *.bak
 *.tmp
+
+# personal data, recordings and private settings: never committed
+.claude/
+labs/
+backups_*/
+ml/out/
+ml/memory/
+data/tmp_render/
+*.mp3
+*.webm
+*.ogg
+*.m4a
+*.flac
+*.bundle
+.env
+.env.*
+*.pem
+*.key

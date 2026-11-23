@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from app import learned
 from app.models import ProfileSection, UserProfile
 from app.profile_logic import (
     face_assets,
@@ -45,7 +46,8 @@ def profile_summary(profile: UserProfile) -> dict:
         "sections": {
             ProfileSection.SCAN.value: sections[ProfileSection.SCAN.value],
             ProfileSection.VOICE.value: sections[ProfileSection.VOICE.value],
-            ProfileSection.OTHER.value: sections[ProfileSection.OTHER.value],
+            ProfileSection.FACTS.value: sections[ProfileSection.FACTS.value],
+            "learned": {"count": len(learned.read(profile.canonical_name))},
         },
         "core_complete": sections["core_complete"],
         "scan_previews": [
@@ -68,10 +70,10 @@ def profile_summary(profile: UserProfile) -> dict:
             }
             for p in profile.voice_phases
         ],
-        "other_preview": {
-            "display_name": profile.other.display_name,
-            "notes": profile.other.notes,
-            "preferences": profile.other.preferences,
+        "facts_preview": {
+            "display_name": profile.facts.display_name,
+            "notes": profile.facts.notes,
+            "preferences": profile.facts.preferences,
         },
         "avatar_ready": profile.avatar_ready,
         "avatar_face_url": media_url(face.path) if face else "",
@@ -136,7 +138,7 @@ def delete_profile(canonical_name: str) -> dict:
 def save_onboarding(canonical_name: str) -> dict:
     if not load_draft(canonical_name):
         # Nothing was changed since the last save. NEVER make a blank draft and commit it: that replaced a person's whole saved profile
-        # (photos, voice and Knowledge) with an empty one every time this ran for someone who already had a saved profile.
+        # (photos, voice and Facts) with an empty one every time this ran for someone who already had a saved profile.
         existing = find_by_display_or_canonical(canonical_name)
         if existing:
             existing = reconcile_profile(existing)

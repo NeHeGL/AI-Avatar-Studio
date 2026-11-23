@@ -23,6 +23,8 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 ML = ROOT / "ml"
+from app import learned as _learned  # noqa: E402
+from app import recall as _recall  # noqa: E402
 from app import topics as _topics  # noqa: E402
 if str(ML) not in sys.path:
     sys.path.insert(0, str(ML))
@@ -32,6 +34,7 @@ LLM_URL = os.environ.get("AVATAR_LLM_URL", "http://127.0.0.1:8772")
 LLM_MODE = os.environ.get("AVATAR_LLM_MODE", "relaxed").strip().lower()
 LLM_TEMPERATURE = float(os.environ.get("AVATAR_LLM_TEMPERATURE", "0.85" if LLM_MODE == "relaxed" else "0.7"))
 LLM_NUM_PREDICT = int(os.environ.get("AVATAR_LLM_NUM_PREDICT", "280"))
+LLM_CTX = int(os.environ.get("AVATAR_LLM_CTX", "4096"))  # the chat model's window, in tokens (start_all.py starts it with the same number)
 SR_IN = 16000
 
 # Things Whisper "hears" in silence/noise.
@@ -380,6 +383,10 @@ def _llm_stream(system: str, history: list[dict], temperature: float | None = No
     )
     try:
         r = urllib.request.urlopen(req, timeout=300)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 400 and b"context" in exc.read().lower():
+            raise RuntimeError("That was too much for the chat model to hold in mind at once. Try again; the oldest part of the chat will be left out.") from exc
+        raise RuntimeError(f"The chat brain refused the request ({exc.code}).") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError("The chat brain is not running yet. It may still be starting; if it never does, run install.bat.") from exc
     with r:
@@ -556,17 +563,17 @@ _CHATTY_RULE = {
 }
 
 
-def _persona_brief(canonical_name: str, knowledge: str) -> dict:
-    """Read the knowledge once and say how this person comes across when talking (cached until the knowledge changes).
+def _persona_brief(canonical_name: str, facts_text: str) -> dict:
+    """Read the facts once and say how this person comes across when talking (cached until they change).
     {"summary": "...", "topics": [...], "chattiness": 1-5}. Empty when the notes say nothing about manner."""
     import hashlib
 
-    if not knowledge.strip():
+    if not facts_text.strip():
         return {}
     from app.storage import profile_dir
 
-    cache = profile_dir(canonical_name) / "knowledge" / "persona.json"
-    digest = hashlib.sha1(("v2|" + knowledge).encode("utf-8")).hexdigest()  # v2: the brief no longer reads moods into life events
+    cache = profile_dir(canonical_name) / "facts" / "persona.json"
+    digest = hashlib.sha1(("v2|" + facts_text).encode("utf-8")).hexdigest()  # v2: the brief no longer reads moods into life events
     try:
         c = json.loads(cache.read_text(encoding="utf-8"))
         if c.get("hash") == digest:
@@ -578,7 +585,7 @@ def _persona_brief(canonical_name: str, knowledge: str) -> dict:
         "Answer with one JSON object and nothing else."
     )
     ask = (
-        f"NOTES:\n{knowledge.strip()[:6000]}\n\n"
+        f"NOTES:\n{facts_text.strip()[:6000]}\n\n"
         "Return JSON with exactly these keys:\n"
         '"summary": two or three sentences on how this person comes across when talking, but ONLY if the notes explicitly describe how they act, '
         "talk or treat people (for example 'very shy', 'really chatty', 'an asshole', 'often ignored people', 'loved their kids'). Keep the notes' "
@@ -607,15 +614,8 @@ def _persona_brief(canonical_name: str, knowledge: str) -> dict:
     return brief
 
 
-def _build_system(display_name: str, notes: str, brief: dict | None = None) -> str:
+def _build_system(display_name: str, notes: str, brief: dict | None = None, learned_lines: list[str] | None = None) -> str:
     facts = []
-    facts_file = ML / "memory" / "facts.txt"
-    if "jeff" in display_name.lower() and facts_file.exists():
-        facts += [
-            l.strip()
-            for l in facts_file.read_text(encoding="utf-8").splitlines()
-            if l.strip() and not l.startswith("#")
-        ]
     if notes.strip():
         facts.append(notes.strip())
     nl = "\n"
@@ -625,6 +625,19 @@ def _build_system(display_name: str, notes: str, brief: dict | None = None) -> s
         if facts
         else f"You have not been told anything about {display_name}'s life yet."
     )
+    learned_part = ""
+    if learned_lines:
+        keep: list[str] = []
+        room = 2400  # characters: the prompt has a fixed amount of room, so only the newest lines that fit go in
+        for line in reversed(learned_lines):
+            if room - len(line) < 0:
+                break
+            keep.append(line)
+            room -= len(line) + 3
+        learned_part = (
+            "THINGS YOU HAVE PICKED UP IN CONVERSATIONS (you noted these yourself, so they are less certain than the PRIVATE BACKGROUND above; "
+            "if any of it disagrees with that background, the background is right and this is wrong):" + nl + "- " + (nl + "- ").join(reversed(keep))
+        )
     discretion = (
         "USING THAT BACKGROUND: a real person does not recite their life story. Never bring up facts, dates, family details, health, "
         "addictions, money, regrets or other personal history on your own, and never as an opener. Mention something from it ONLY when the other "
@@ -669,7 +682,15 @@ def _build_system(display_name: str, notes: str, brief: dict | None = None) -> s
     grounding = (
         "You know general knowledge well and should answer confidently and briefly. "
         "Do not invent private facts about the other person or your own life beyond what you were told; "
-        "for those, say you do not know. You have no memory beyond this chat."
+        "for those, say you do not know. Apart from your background and the things listed as picked up in conversations, you have no memory beyond this chat."
+    )
+    curiosity = (
+        "GETTING TO KNOW EACH OTHER: if you do not yet know who you are talking to, find a natural moment early on to ask their name. Now and then, "
+        "when it fits, you may ask about something you do not know and would like to: about them, or a basic fact about your own life that is missing "
+        "from your background (such as your birthday or the people close to you). Ask one thing at a time, never several in a row, never like an "
+        "interview, and take their answer as true. Remember what they tell you for the rest of the conversation. "
+        "But your PRIVATE BACKGROUND is the truth about your own life: if someone tells you something about yourself that disagrees with it "
+        "(a different birthday, a different school), keep what your background says and say, kindly, that you remember it differently."
     )
     mood_default = (
         "YOUR DEFAULT MOOD is warm, relaxed, curious and a little playful, never gloomy, tired or disappointed. Do not sigh, mope or sound let down "
@@ -695,7 +716,8 @@ def _build_system(display_name: str, notes: str, brief: dict | None = None) -> s
         if brief.get("topics"):
             manner += " Subjects that matter to you, which you show interest in if the other person brings them up (do not raise them yourself): " + ", ".join(brief["topics"]) + "."
     extra = _extra_system_instructions()
-    parts = [tone, presence, mood_default, conversational, manner, spoken, known, discretion, grounding] if manner else [tone, presence, mood_default, conversational, spoken, known, discretion, grounding]
+    parts = [tone, presence, mood_default, conversational, manner, spoken, known, learned_part, discretion, grounding, curiosity]
+    parts = [x for x in parts if x]
     if extra:
         parts.append(extra)
     return nl.join(parts)
@@ -711,7 +733,7 @@ def _sounded(words: list[str]) -> str:
 
 
 def _pronunciations(display_name: str, notes: str) -> tuple[dict[str, str], list[tuple["re.Pattern", str]]]:
-    """Names the voice would get wrong, from the person's notes ("last name is pronounced: mall o fee", "sean molofee (pronounced shawn)").
+    """Names the voice would get wrong, from the person's notes ("last name is pronounced: smith eth", "john doe (pronounced jon)").
     Returns (name -> a spelling the voice reads smoothly, patterns that turn a sounded-out spelling the model might write back into the name)."""
     pron: dict[str, str] = {}
     back: list[tuple[re.Pattern, str]] = []
@@ -725,7 +747,7 @@ def _pronunciations(display_name: str, notes: str) -> tuple[dict[str, str], list
                 if len(words) > 1:
                     back.append((re.compile(r"[\s\-\.]*".join(re.escape(w) for w in words), re.I), last))
             continue
-        m = re.match(r"\s*(?:[A-Za-z' ]+:\s*)?([A-Za-z']+)\s+[A-Za-z']+\s*\(pronounced\s+([^)]+)\)", line, re.I)  # "brother: sean molofee (pronounced shawn)"
+        m = re.match(r"\s*(?:[A-Za-z' ]+:\s*)?([A-Za-z']+)\s+[A-Za-z']+\s*\(pronounced\s+([^)]+)\)", line, re.I)  # "brother: john doe (pronounced jon)"
         if m:
             pron[m.group(1)] = m.group(2).strip()
             continue
@@ -737,9 +759,9 @@ def _pronunciations(display_name: str, notes: str) -> tuple[dict[str, str], list
 
 def _entered_text(prof) -> str:
     """Everything a person typed into their profile: the notes, the extra name field, and any preference text."""
-    other = getattr(prof, "other", None)
-    parts = [getattr(other, "notes", "") or "", getattr(other, "display_name", "") or ""]
-    for v in (getattr(other, "preferences", None) or {}).values():
+    facts = getattr(prof, "facts", None)
+    parts = [getattr(facts, "notes", "") or "", getattr(facts, "display_name", "") or ""]
+    for v in (getattr(facts, "preferences", None) or {}).values():
         if isinstance(v, str):
             parts.append(v)
     return "\n".join(p for p in parts if p)
@@ -747,7 +769,7 @@ def _entered_text(prof) -> str:
 
 def _gather_pronunciations(canonical_name: str, notes: str) -> tuple[dict[str, str], list[tuple["re.Pattern", str]]]:
     """How names are said, read BEFORE the avatar speaks (so its introduction already says them right): first from the other saved
-    profiles (a family shares a surname, so Jeff's note about it also helps Sam's avatar), then from this person's own entries,
+    profiles (a family shares a surname, so one person's note about it also helps another's avatar), then from this person's own entries,
     which win."""
     pron: dict[str, str] = {}
     back: list[tuple["re.Pattern", str]] = []
@@ -790,9 +812,13 @@ def _for_voice(sess: "Session", text: str) -> str:
 class Session:
     def __init__(self, canonical_name: str, display_name: str, notes: str, brief: dict | None = None):
         self.name = display_name
+        self.canonical = canonical_name
+        self.notes = notes
         self.history: list[dict] = []
         self.brief = brief or {}
-        self.system = _build_system(display_name, notes, self.brief)
+        self.busy = False  # a reply is being made right now (the note-taking waits for it)
+        self.learn_pending: list[tuple[str, str]] = []  # (what the avatar had said, what the person answered), not yet read for facts
+        self.learn_retries = 0
         entered = notes
         try:
             from app.storage import get_working_profile
@@ -811,7 +837,7 @@ def _voice_reference(canonical_name: str) -> tuple[str, Path | None, str, str]:
     s = profile_summary(prof)
     url = s.get("avatar_voice_url") or ""
     path = DATA_ROOT / url.removeprefix("/data/") if url.startswith("/data/") else None
-    notes = (getattr(prof, "other", None) and getattr(prof.other, "notes", "")) or ""
+    notes = (getattr(prof, "facts", None) and getattr(prof.facts, "notes", "")) or ""
     return s.get("display_name") or canonical_name, path if path and path.exists() else None, notes, s.get("canonical_name", canonical_name)
 
 
@@ -1176,7 +1202,7 @@ def _intro_prompt(display: str, first_ever: bool = True) -> str:
 def _intro_marker(canonical_name: str):
     from app.storage import profile_dir
 
-    return profile_dir(canonical_name) / "knowledge" / "introduced"
+    return profile_dir(canonical_name) / "facts" / "introduced"
 
 
 FREE_THOUGHTS = [
@@ -1216,6 +1242,8 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, to
     if sess is None:
         yield _ev(type="error", message="Chat not started for this profile.")
         return
+    sess.busy = True
+    prev_avatar = ""  # what it had just said before this turn, so a short answer ("June fifth") can be understood
     said: list[str] = []  # what has been handed to the page so far (tagged)
     cancel = cancel or threading.Event()  # set when the page hangs up (you spoke over the reply): no more voice or video is made for it
     _current_turn["cancel"] = cancel
@@ -1256,10 +1284,14 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, to
             llm_history = sess.history + [{"role": "user", "content": _nudge_prompt(nudge, canonical_name, sess.name)}]
         else:
             yield _ev(type="heard", text=text)
+            if sess.history and sess.history[-1]["role"] == "assistant":
+                prev_avatar = _TAG.sub("", sess.history[-1]["content"]).strip()
             if sess.history and sess.history[-1]["role"] == "user":
                 sess.history.pop()  # an earlier turn was cancelled before it was answered; this one repeats it plus more
             sess.history.append({"role": "user", "content": text})
             llm_history = sess.history
+        query = f"{text or ''} {prev_avatar}" if text else " ".join(m["content"] for m in sess.history[-2:] if m["role"] == "user")
+        system, llm_history = _compose_prompt(sess, canonical_name, query, llm_history)
         t0 = time.time()
         # Overlap the work: the language model keeps writing while earlier sentences get their voice and video.
         jobs: "queue.Queue" = queue.Queue()
@@ -1283,7 +1315,7 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, to
                     mood = "neutral"
                     # people who run short phrases together ("flow") keep longer chunks, so their phrases are not cut apart
                     sizes = dict(first_min=30, first_max=60, later_min=50, later_max=110) if (getattr(sess, "voice_profile", None) or {}).get("flow") else {}
-                    for sent in _sentences(_llm_stream(sess.system, llm_history), **sizes):
+                    for sent in _sentences(_llm_stream(system, llm_history), **sizes):
                         if cancel.is_set():
                             break
                         sent, mood = _split_mood(sent, mood)
@@ -1324,6 +1356,8 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, to
         if nudge:
             sess.history.append({"role": "user", "content": "(the person has just opened the chat)" if nudge == GREETING_NUDGE else "(neither of you said anything for a while)"})
         sess.history.append({"role": "assistant", "content": " ".join(said)})  # tagged
+        if text and not nudge:
+            _schedule_learning(sess, prev_avatar, text)
         yield _ev(type="done")
     except GeneratorExit:
         # the page hung up: you spoke over the reply. Stop making voice and video for it, and keep what was actually handed over in the
@@ -1332,8 +1366,73 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, to
         if said:
             sess.history.append({"role": "assistant", "content": " ".join(said)})
             _log(f"reply cut off by the person after {len(said)} chunk(s)")
+        if text and not nudge:
+            _schedule_learning(sess, prev_avatar, text)
         raise
     except Exception as exc:  # surface to the page instead of a silent hang
         cancel.set()
         _log("ERROR", repr(exc))
         yield _ev(type="error", message=f"{type(exc).__name__}: {exc}")
+    finally:
+        sess.busy = False
+
+
+def _compose_prompt(sess: "Session", canonical_name: str, query: str, history: list[dict]) -> tuple[str, list[dict]]:
+    """The system prompt and the conversation for THIS reply, fitted into the chat model's window. Facts and AI Learned of any length are searched
+    for what matters to `query` (on the processor, no graphics memory); short ones go in whole. The conversation gets what is left, oldest first to go."""
+    fixed = _build_system(sess.name, "", sess.brief, [])
+    room = LLM_CTX - _recall.tokens_est(fixed) - LLM_NUM_PREDICT - 200  # 200: the chat format's own markers and a safety margin
+    learned_budget = max(150, min(450, room // 5))
+    facts_budget = max(250, min(1100, room - learned_budget - 700))  # the conversation keeps at least about 700 tokens
+    # notes that fit go in exactly as written; longer ones are searched for what matters to this message
+    facts = sess.notes if _recall.tokens_est(sess.notes) <= facts_budget else chr(10).join(_recall.select(_recall.split_chunks(sess.notes), query, facts_budget, core_words=100))
+    learned = _recall.select(_learned.read(canonical_name), query, learned_budget, prefer_recent=True)
+    system = _build_system(sess.name, facts, sess.brief, learned)
+    history_budget = LLM_CTX - _recall.tokens_est(system) - LLM_NUM_PREDICT - 200
+    return system, _recall.fit_history(history, history_budget)
+
+
+# ---- what it learns on its own: read what the person said for lasting facts, a few seconds after the reply, never while a reply is being made
+LEARN_DELAY_S = 4.0
+_learn_lock = threading.Lock()
+
+
+def _ask_notes(system: str, user: str) -> str:
+    return "".join(_llm_stream(system, [{"role": "user", "content": user}], temperature=0.1, max_tokens=250))
+
+
+def _schedule_learning(sess: "Session", prev_avatar: str, said: str) -> None:
+    sess.learn_pending.append((prev_avatar[-300:], said[:600]))
+    del sess.learn_pending[:-4]
+    _learn_later(sess, LEARN_DELAY_S)
+
+
+def _learn_later(sess: "Session", delay: float) -> None:
+    t = threading.Timer(delay, _learn_now, (sess,))
+    t.daemon = True
+    t.start()
+
+
+def _learn_now(sess: "Session") -> None:
+    if sess.busy and sess.learn_retries < 12:  # a new reply is being made: wait, so taking notes never slows it down
+        sess.learn_retries += 1
+        _learn_later(sess, 3.0)
+        return
+    sess.learn_retries = 0
+    if not _learn_lock.acquire(blocking=False):
+        return
+    try:
+        pending, sess.learn_pending = sess.learn_pending[:], []
+        if not pending:
+            return
+        try:
+            query = " ".join(p for _a, p in pending)
+            known_facts = "\n".join(_recall.select(_recall.split_chunks(sess.notes), query, 600, core_words=60))
+            known_learned = _recall.select(_learned.read(sess.canonical), query, 350, prefer_recent=True)
+            facts = _learned.extract(_ask_notes, sess.name, known_facts, known_learned, pending)
+            added = _learned.add(sess.canonical, facts)
+            _log(f"noted {len(added)} new thing(s): {added}" if added else "nothing new to note")
+        except Exception as exc:  # taking notes is a bonus: never let it break the chat
+            _log("could not take notes:", exc)
+    finally:
+        _learn_lock.release()

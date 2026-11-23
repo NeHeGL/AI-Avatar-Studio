@@ -942,6 +942,7 @@ textarea {
 .chat-log>:first-child{margin-top:auto}
 .chat-line{margin:.25rem 0;font-size:.95rem}
 .chat-line.you{opacity:.75}
+.chat-line.note{opacity:.55;font-style:italic;font-size:.85rem}
 .chat-type{display:flex;gap:.5rem;max-width:34rem;margin:.6rem auto 0}
 .chat-type input{flex:1;padding:.5rem .7rem;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(0,0,0,.25);color:inherit}
 .orbit-grid{margin:.8rem auto 0;max-width:34rem;display:flex;flex-direction:column;gap:.35rem}
@@ -1393,10 +1394,10 @@ body .subtitle:empty { display: none; }
 
 .voice-tile-date { font-size: 0.78rem; color: var(--muted); }
 
-/* Knowledge screen: a tall writing box that fills the card, with a short note on what the screen is for */
-.knowledge-blurb { margin: 0 0 0.9rem; text-align: center; line-height: 1.45; }
-.knowledge-text { flex: 1 1 auto; min-height: 9rem; resize: none; text-align: left; margin-bottom: 1.25rem; } /* fills what is left of the card between the note and the buttons */
-.screen-root > .step-card.step-card--knowledge > * { max-width: none; } /* everything on this screen uses the whole card width: the note takes fewer lines, so the writing box gets more room */
+/* Facts screen: a tall writing box that fills the card, with a short note on what the screen is for */
+.facts-blurb { margin: 0 0 0.9rem; text-align: center; line-height: 1.45; }
+.facts-text { flex: 1 1 auto; min-height: 9rem; resize: none; text-align: left; margin-bottom: 1.25rem; } /* fills what is left of the card between the note and the buttons */
+.screen-root > .step-card.step-card--facts > * { max-width: none; } /* everything on this screen uses the whole card width: the note takes fewer lines, so the writing box gets more room */
 
 /* Voice recorder and its check screen: the same card height, buttons pinned to the bottom, so the card does not jump or grow */
 .voice-flow { min-height: 27rem; display: flex; flex-direction: column; }

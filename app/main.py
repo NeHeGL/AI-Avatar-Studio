@@ -15,9 +15,9 @@ from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import capture, chat, walkthrough
+from app import capture, chat, learned, walkthrough
 from app.storage import list_saved_names
-from app.storage import DATA_ROOT, migrate_legacy_layout, purge_unsaved_user_files, seed_demo_user
+from app.storage import DATA_ROOT, migrate_legacy_layout, purge_unsaved_user_files
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static"
@@ -121,11 +121,11 @@ class SkipBody(BaseModel):
     canonical_name: str
 
 
-class OtherBody(BaseModel):
+class FactsBody(BaseModel):
     canonical_name: str
     display_name: str = ""
     notes: str = ""
-    clear: bool = False  # only the Knowledge editor sets this, when the person really emptied the notes
+    clear: bool = False  # only the Facts editor sets this, when the person really emptied the notes
 
 
 @app.on_event("startup")
@@ -133,8 +133,6 @@ def startup() -> None:
     migrate_legacy_layout()
     purge_unsaved_user_files()
     chat.warmup()  # load the chat brain, speech and voice now, so they are ready by the time a person is picked
-    if os.environ.get("AVATAR_SEED_DEMO", "").strip() == "1":
-        seed_demo_user()
     if _launch_browser and _launch_url:
 
         def _open() -> None:
@@ -271,9 +269,37 @@ def api_voice_delete(body: VoiceNameBody) -> dict:
     return capture.voice_delete(body.canonical_name, body.name)
 
 
-@app.post("/api/capture/other")
-def api_other(body: OtherBody) -> dict:
-    return capture.ingest_other(body.canonical_name, body.display_name, body.notes, body.clear)
+class LearnedGetBody(BaseModel):
+    canonical_name: str
+
+
+class LearnedSaveBody(BaseModel):
+    canonical_name: str
+    text: str = ""
+
+
+@app.post("/api/learned/get")
+def api_learned_get(body: LearnedGetBody) -> dict:
+    """What the avatar has noted on its own (data/profiles/<name>/facts/learned.txt), for the person to read."""
+    return {"lines": learned.read(body.canonical_name)}
+
+
+@app.post("/api/learned/save")
+def api_learned_save(body: LearnedSaveBody) -> dict:
+    """The person edited what it learned: one fact per line."""
+    lines = learned.write(body.canonical_name, body.text.splitlines())
+    return {"lines": lines, "count": len(lines)}
+
+
+@app.get("/api/learned/news")
+def api_learned_news(name: str) -> dict:
+    """Facts noted since the last call, so the chat page can say "Noted: ..."."""
+    return {"facts": learned.take_news(name)}
+
+
+@app.post("/api/capture/facts")
+def api_facts(body: FactsBody) -> dict:
+    return capture.save_facts(body.canonical_name, body.display_name, body.notes, body.clear)
 
 
 class ReplyDoneBody(BaseModel):
@@ -341,7 +367,7 @@ def api_hardware() -> dict:
 
         out = subprocess.run(["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
                              capture_output=True, text=True, timeout=5).stdout.split(",")
-        used, total = float(out[0]) / 1024, float(out[1]) / 1024
+        used, total = max(0.0, float(out[0]) / 1024 - hardware.reserved_gb()), float(out[1]) / 1024  # a deliberate reserve (simulating a smaller card) is not the app's
     except Exception:
         pass
     return {

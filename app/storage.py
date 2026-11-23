@@ -7,10 +7,10 @@ from pathlib import Path
 from app.models import UserProfile
 
 DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
-# One folder per person: data/profiles/<name>/{photo,voice,knowledge}, the same three things the app shows, plus cache/
+# One folder per person: data/profiles/<name>/{photo,voice,facts}, the same three things the app shows, plus cache/
 #   photo/      the person's face photos
 #   voice/      voice recordings, the reference clip and per-person voice settings
-#   knowledge/  what the avatar knows about the person: profile.json (saved) and draft.json (being edited)
+#   facts/      what the avatar knows about the person: profile.json (saved), draft.json (being edited), learned.txt (what it noted itself)
 #   cache/      made by the app from the above (animation clips, talking-reply videos); safe to delete, it is rebuilt
 PROFILES_DIR = DATA_ROOT / "profiles"
 # Old flat layout (data/users, data/drafts, data/media): only read by migrate_legacy_layout()
@@ -25,7 +25,7 @@ def normalize_name_key(name: str) -> str:
 
 
 def folder_name(name: str) -> str:
-    """Folder for a person: the normalized name with spaces as underscores ("jeff molofee" -> "jeff_molofee")."""
+    """Folder for a person: the normalized name with spaces as underscores ("jane doe" -> "jane_doe")."""
     return normalize_name_key(name).replace(" ", "_")
 
 
@@ -46,19 +46,19 @@ def voice_dir(name: str) -> Path:
 
 
 def profile_path(key: str) -> Path:
-    return profile_dir(key) / "knowledge" / "profile.json"
+    return profile_dir(key) / "facts" / "profile.json"
 
 
 def draft_path(key: str) -> Path:
-    return profile_dir(key) / "knowledge" / "draft.json"
+    return profile_dir(key) / "facts" / "draft.json"
 
 
 def _saved_files() -> list[Path]:
-    return sorted(PROFILES_DIR.glob("*/knowledge/profile.json")) if PROFILES_DIR.exists() else []
+    return sorted(PROFILES_DIR.glob("*/facts/profile.json")) if PROFILES_DIR.exists() else []
 
 
 def find_by_display_or_canonical(name: str) -> UserProfile | None:
-    """Saved profiles only (data/profiles/<name>/knowledge/profile.json). Drafts do not count as existing users."""
+    """Saved profiles only (data/profiles/<name>/facts/profile.json). Drafts do not count as existing users."""
     key = normalize_name_key(name)
     direct = profile_path(key)
     if direct.exists():
@@ -158,7 +158,7 @@ def get_working_profile(full_name: str) -> UserProfile:
 
 
 def delete_saved_profile(full_name: str) -> bool:
-    """Delete a profile completely: its saved profile, any draft, and its whole folder (knowledge, media, voice)."""
+    """Delete a profile completely: its saved profile, any draft, and its whole folder (facts, photo, voice, cache)."""
     import shutil
 
     key = normalize_name_key(full_name)
@@ -217,78 +217,8 @@ def commit_draft(full_name: str) -> UserProfile | None:
     return saved
 
 
-def seed_demo_user() -> None:
-    """Optional demo data so the returning-user path is testable."""
-    key = normalize_name_key("Jeff Molofee")
-    if profile_path(key).exists() or profile_dir(key).exists():
-        return  # never invent a demo profile over a folder that already holds a real person's photos, voice and notes
-    scan_dir = photo_dir("Jeff Molofee")
-    scan_dir.mkdir(parents=True, exist_ok=True)
-    voice_dir("Jeff Molofee").mkdir(parents=True, exist_ok=True)
-
-    from app.models import OtherData, ScanAsset, VoicePhase
-
-    profile = UserProfile(
-        canonical_name="Jeff Molofee",
-        display_name="Jeff",
-        saved=True,
-        scan_complete=True,
-        voice_complete=True,
-        other_complete=True,
-        avatar_ready=True,
-        scan_assets=[
-            ScanAsset(
-                id="s1",
-                path=str(scan_dir / "front.svg"),
-                caption="Front neutral",
-                quality_score=0.92,
-            ),
-            ScanAsset(
-                id="s2",
-                path=str(scan_dir / "left.svg"),
-                caption="Left 3/4",
-                quality_score=0.88,
-            ),
-            ScanAsset(
-                id="s3",
-                path=str(scan_dir / "right.svg"),
-                caption="Right 3/4",
-                quality_score=0.45,
-            ),
-        ],
-        voice_phases=[
-            VoicePhase(
-                id="v1",
-                label="Greeting",
-                path="",
-                waveform_peaks=[
-                    0.2, 0.5, 0.8, 0.6, 0.9, 0.4, 0.3, 0.7, 0.5, 0.2,
-                ],
-                duration_sec=2.4,
-                quality_score=0.91,
-            ),
-            VoicePhase(
-                id="v2",
-                label="Story read",
-                path="",
-                waveform_peaks=[
-                    0.1, 0.3, 0.6, 0.4, 0.5, 0.8, 0.7, 0.6, 0.4, 0.2,
-                ],
-                duration_sec=5.1,
-                quality_score=0.55,
-            ),
-        ],
-        other=OtherData(
-            display_name="Jeff",
-            notes="Prefers casual tone; avatar scale 1.0",
-            preferences={"lip_sync": "standard", "idle_motion": True},
-        ),
-    )
-    save_profile(profile)
-
-
 def migrate_legacy_layout() -> None:
-    """Move the old flat folders (users/, drafts/, media/) into data/profiles/<name>/{photo,voice,knowledge,cache}.
+    """Move the old flat folders (users/, drafts/, media/) into data/profiles/<name>/{photo,voice,facts,cache}.
 
     Moves only, never deletes content. File paths stored inside the profile JSON are repointed to the new place."""
     import shutil
@@ -298,17 +228,18 @@ def migrate_legacy_layout() -> None:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dst))
 
-    if PROFILES_DIR.exists():  # earlier layout: the knowledge folder was called "data"
+    _migrate_facts_folder()  # the folder that holds the profile used to be called knowledge/; every step below uses the new name
+    if PROFILES_DIR.exists():  # earlier layout: the facts folder was called "data"
         for d in sorted(PROFILES_DIR.iterdir()):
-            if d.is_dir() and (d / "data").is_dir() and not (d / "knowledge").exists():
-                (d / "data").rename(d / "knowledge")
+            if d.is_dir() and (d / "data").is_dir() and not (d / "facts").exists():
+                (d / "data").rename(d / "facts")
     if PROFILES_DIR.exists():  # first-generation layout used spaces in the folder names
         for d in sorted(PROFILES_DIR.iterdir()):
             if d.is_dir() and " " in d.name:
                 new = PROFILES_DIR / d.name.replace(" ", "_")
                 if not new.exists():
                     d.rename(new)
-                    for jf in new.glob("knowledge/*.json"):
+                    for jf in new.glob("facts/*.json"):
                         text = jf.read_text(encoding="utf-8")
                         for sep in ("\\\\", "/"):
                             text = text.replace(f"profiles{sep}{d.name}{sep}", f"profiles{sep}{new.name}{sep}")
@@ -323,7 +254,7 @@ def migrate_legacy_layout() -> None:
             for f in sorted(folder.glob("*.json")):
                 key = normalize_name_key(f.stem)
                 if not has_proper_twin(key):  # an old underscore-named stub is left behind
-                    mv(f, profile_dir(key) / "knowledge" / fname)
+                    mv(f, profile_dir(key) / "facts" / fname)
     if MEDIA_DIR.exists():
         for m in sorted(MEDIA_DIR.iterdir()):
             if m.is_dir():
@@ -349,7 +280,7 @@ def migrate_legacy_layout() -> None:
         return value
 
     if PROFILES_DIR.exists():
-        for jf in PROFILES_DIR.glob("*/knowledge/*.json"):
+        for jf in PROFILES_DIR.glob("*/facts/*.json"):
             try:
                 raw = json.loads(jf.read_text(encoding="utf-8"))
             except Exception:
@@ -363,9 +294,32 @@ def migrate_legacy_layout() -> None:
     _migrate_media_folder()
 
 
+def _migrate_facts_folder() -> None:
+    """The folder that holds a person's profile was called knowledge/ and is now facts/ (the screen is called Facts). Moves only: nothing is
+    deleted, and if both exist the missing files are brought over."""
+    import shutil
+
+    if not PROFILES_DIR.exists():
+        return
+    for d in sorted(PROFILES_DIR.iterdir()):
+        old, new = d / "knowledge", d / "facts"
+        if not old.is_dir():
+            continue
+        if not new.exists():
+            old.rename(new)
+            continue
+        for f in old.iterdir():
+            if not (new / f.name).exists():
+                shutil.move(str(f), str(new / f.name))
+        try:
+            old.rmdir()  # only when it is empty
+        except OSError:
+            pass
+
+
 def _migrate_media_folder() -> None:
     """The previous layout kept everything in media/ (scan photos, animation clips, reply videos, and whatever else landed there).
-    The photos move to photo/ and the rest to cache/; the paths stored in the knowledge files are repointed. Moves only."""
+    The photos move to photo/ and the rest to cache/; the paths stored in the facts files are repointed. Moves only."""
     import shutil
 
     if not PROFILES_DIR.exists():
@@ -390,7 +344,7 @@ def _migrate_media_folder() -> None:
             media.rmdir()  # only when it is empty
         except OSError:
             pass
-        for jf in d.glob("knowledge/*.json*"):
+        for jf in d.glob("facts/*.json*"):
             try:
                 text = jf.read_text(encoding="utf-8")
             except Exception:

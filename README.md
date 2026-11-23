@@ -6,7 +6,8 @@ I made this because I want to bring people back from the dead, even just for a c
 
 ## What it does
 
-- **Learns the person.** A Knowledge page holds everything you know about them (birthday, family, interests, how their name is pronounced, how they spoke). The avatar uses it in conversation and works out how the person comes across from what you wrote.
+- **Learns the person.** A Facts page holds everything you know about them (birthday, family, interests, how their name is pronounced, how they spoke). The avatar uses it in conversation and works out how the person comes across from what you wrote.
+- **Keeps learning.** While you talk, the avatar notes lasting things you tell it (a birthday, a name, something you like) in an **AI Learned** list (`facts/learned.txt`) and says "Noted: ..." when it does. You can read, fix or delete anything in it. What you wrote under Facts is always the truth: it outranks what the avatar learned, and a fact that contradicts Facts is never saved. It may also ask you things, such as your name. Facts and AI Learned can be as long as you like: the chat model only reads about 4,000 tokens at a time, so before each reply both are searched on the processor (milliseconds, no graphics memory) and only the parts that matter for what you just said go in. Short ones go in whole.
 - **Faces.** Add a photo with your webcam or by upload. The program finds the face, levels it, centres and zooms it, crops it to the exact framing the video engine uses, and tells you plainly if the photo is blurry, too dark, turned away or has closed eyes. With the webcam it takes the shot itself when you look straight ahead with your eyes open and in focus, and keeps the best. Keep up to **5 photos** per person and swap between them with one click.
 - **Voices.** Record a short passage or upload audio (up to **5 recordings** per person). The program picks the clearest speech from all of them and builds one clean reference clip to copy the voice from. It attempts to recreate their voice; how close it gets depends on the recording. A voice you like can be locked so it never changes.
 - **Talks back.** You speak (or type), it listens, thinks, and answers with synthesized speech and a lip-synced video of the face.
@@ -18,7 +19,7 @@ A conversation feels dead if every reply has a pause in front of it. A lot of th
 
 - Every model is loaded at start-up (with a progress screen), so the first reply is not slow.
 - Replies are spoken sentence by sentence while the model is still writing, with a short first sentence so the voice starts early.
-- Speech recognition runs live while you talk, with strict turn-taking so the avatar does not hear itself.
+- Speech recognition runs live while you talk, so your words appear as you speak. The microphone is ignored while the avatar is speaking (its voice and yours cannot be told apart), so it never hears itself. While it is still thinking you can carry on, and your parts are joined into one question.
 - While it thinks, the face is never frozen: a bank of calm "waiting" animations plays, and every clip starts and ends on the same still frame, so clips join without a visible jump.
 - Models are chosen to fit your graphics card, so nothing swaps out of memory mid-conversation.
 
@@ -28,7 +29,9 @@ A conversation feels dead if every reply has a pause in front of it. A lot of th
 |---|---|---|
 | **32 GB** (preferred) | Gemma 3 12B | Whisper large-v3 turbo on the GPU |
 | 20 to 28 GB | Gemma 3 12B | Whisper small on the GPU |
-| **16 GB** (works) | Gemma 3 4B (smaller) | Whisper distil-small on the CPU |
+| **16 GB** (tight) | Gemma 3 4B (smaller) | Whisper distil-small on the CPU |
+
+On a 16 GB card it fits, with about 1 GB to spare. Tested by reserving the rest of a larger card, so that Windows and the app had exactly 16 GB: it loaded, transcribed speech and answered four turns in a row with no memory errors, using about 11.5 GB when idle and 12.5 GB while it answers, plus Windows' own share, for a peak of about 15 GB. The first sound took 7 to 10 seconds. Close other programs that use the graphics card (browsers playing video, games). It has not been run on a real 16 GB card, whose speed will differ.
 
 Windows 10/11, an NVIDIA card (RTX 20-series or newer), Python 3.11, and about 25 GB of free disk space. The first start downloads about 14 GB of models, once.
 
@@ -60,7 +63,7 @@ Put a chat-tuned `.gguf` file in `brain/models/` and name it `custom-<anything>.
 | `static/` | The web pages |
 | `brain/` | The chat model and its server (downloaded by the installer) |
 | `ml/` | Voice and video code and the Python environment |
-| `data/profiles/<name>/` | One folder per person: `photo/`, `voice/`, `knowledge/` (and `cache/`, made by the app and safe to delete) (git-ignored) |
+| `data/profiles/<name>/` | One folder per person: `photo/`, `voice/`, `facts/` (and `cache/`, made by the app and safe to delete) (git-ignored) |
 
 ## Limits
 

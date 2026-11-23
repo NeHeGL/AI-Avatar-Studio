@@ -83,11 +83,11 @@ def reconcile_profile(profile: UserProfile) -> UserProfile:
     profile.voice_complete = any(
         (p.path or "").strip() for p in profile.voice_phases
     )
-    profile.other_complete = bool(
-        (profile.other.notes or "").strip()
+    profile.facts_complete = bool(
+        (profile.facts.notes or "").strip()
         or (
-            (profile.other.display_name or "").strip()
-            and profile.other.display_name.strip() != profile.canonical_name.strip()
+            (profile.facts.display_name or "").strip()
+            and profile.facts.display_name.strip() != profile.canonical_name.strip()
         )
     )
     profile.avatar_ready = profile.scan_complete and profile.voice_complete
@@ -112,9 +112,9 @@ def section_status(profile: UserProfile) -> dict:
             "complete": profile.section_complete(ProfileSection.VOICE),
             "count": len(profile.voice_phases),
         },
-        ProfileSection.OTHER.value: {
-            "complete": profile.section_complete(ProfileSection.OTHER),
-            "words": len((profile.other.notes or "").split()),
+        ProfileSection.FACTS.value: {
+            "complete": profile.section_complete(ProfileSection.FACTS),
+            "words": len((profile.facts.notes or "").split()),
         },
         "core_complete": core_complete(profile),
     }

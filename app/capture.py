@@ -185,11 +185,11 @@ def delete_photo(canonical_name: str, name: str) -> dict:
     return {"status": "ok", "profile": profile_summary(profile), **photos(canonical_name)}
 
 
-def ingest_other(canonical_name: str, display_name: str, notes: str, force_clear: bool = False) -> dict:
+def save_facts(canonical_name: str, display_name: str, notes: str, force_clear: bool = False) -> dict:
     profile = get_working_profile(canonical_name)
-    profile.other.display_name = display_name.strip() or profile.display_name
-    if notes.strip() or not (profile.other.notes or "").strip() or force_clear:
-        profile.other.notes = notes.strip()  # an empty note never silently replaces existing Knowledge
+    profile.facts.display_name = display_name.strip() or profile.display_name
+    if notes.strip() or not (profile.facts.notes or "").strip() or force_clear:
+        profile.facts.notes = notes.strip()  # an empty note never silently replaces existing Facts
     profile = reconcile_profile(profile)
     profile.touch()
     save_draft(profile)

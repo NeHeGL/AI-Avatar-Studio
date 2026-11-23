@@ -90,11 +90,11 @@ export async function runSetupPipeline(ctx, opts = {}) {
     state.profile = voiceResult.profile;
   }
 
-  if ((needFace || needVoice) && !state.profile?.other_preview?.notes) {
-    // Only for a profile with no notes yet. This used to run for EVERY setup and save empty notes over the person's Knowledge.
-    await api("/api/capture/other", {
+  if ((needFace || needVoice) && !state.profile?.facts_preview?.notes) {
+    // Only for a profile with no notes yet. This used to run for EVERY setup and save empty notes over the person's Facts.
+    await api("/api/capture/facts", {
       canonical_name: state.canonicalName,
-      display_name: state.profile?.other_preview?.display_name || state.canonicalName,
+      display_name: state.profile?.facts_preview?.display_name || state.canonicalName,
       notes: "",
     });
   }

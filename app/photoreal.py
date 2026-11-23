@@ -1,8 +1,8 @@
-"""Prepare a person's photo for the photo-real avatar (live idle face, reply videos, optional clips).
+"""Prepare a person's photo for the photo-real avatar (the still face, its waiting animations and the live reply videos).
 
 Works from whatever the person has: a single photo is enough; a high-resolution wide scan frame is better.
 The result is data/profiles/<user>/cache/face/source.jpg, the one picture every photo-real layer is built from, so the
-framing never changes between the idle face, the pre-made clips and the live reply videos.
+framing never changes between the still face, the waiting animations and the live reply videos.
 """
 from __future__ import annotations
 
@@ -257,7 +257,7 @@ def prepare_talk_person(canonical_name: str) -> None:
 
 
 def status(canonical_name: str) -> dict:
-    """What the page needs to know: is there a source photo, and a pre-made clip library?"""
+    """What the page needs to know: is there a source photo, and how large is it?"""
     src = ensure_source(canonical_name)
     if src:
         prepare_talk_person(canonical_name)

@@ -104,7 +104,7 @@ function sectionBadge(kind, s) {
     if (s.voice.complete) return { cls: "done", text: "✓", tip: plural(s.voice.count, "recording", "recordings") };
     return { cls: "pending", text: "Required", tip: "The avatar needs a voice recording" };
   }
-  if (s.other.complete) return { cls: "done", text: "✓", tip: s.other.words ? plural(s.other.words, "word", "words") + " of knowledge" : "Display name set" };
+  if (s.facts.complete) return { cls: "done", text: "✓", tip: s.facts.words ? plural(s.facts.words, "word", "words") + " of facts" : "Display name set" };
   return { cls: "optional", text: "Optional", tip: "Tell the AI about this person so it knows them better" };
 }
 const badgeHtml = (b) => `<span class="badge ${b.cls}" title="${b.tip}">${b.text}</span>`;
@@ -115,14 +115,19 @@ function renderSectionsList(profile) {
   const s = profile.sections;
   const bs = sectionBadge("scan", s);
   const bv = sectionBadge("voice", s);
-  const bo = sectionBadge("other", s);
+  const bf = sectionBadge("facts", s);
+  const learnedCount = s.learned?.count || 0;
+  const bl = learnedCount
+    ? { cls: "done", text: "✓", tip: `${plural(learnedCount, "thing", "things")} the AI has noted on its own` }
+    : { cls: "optional", text: "Automatic", tip: "The AI writes here by itself as it learns things in conversation" };
   const stored = (n, one, many) => (n ? plural(n, one, many) : "None");
   ul.classList.add("stats-grid");
   ul.innerHTML = `
     <li class="stats-head"><span>Step</span><span>Records Stored</span><span>Contains Data</span></li>
     <li class="row-link" data-section="scan" role="button" tabindex="0" title="See and change your photos"><span>Photo</span><span>${stored(s.scan.count, "photo", "photos")}</span>${badgeHtml(bs)}</li>
     <li class="row-link" data-section="voice" role="button" tabindex="0" title="Listen to and change your recordings"><span>Voice</span><span>${stored(s.voice.count, "recording", "recordings")}</span>${badgeHtml(bv)}</li>
-    <li class="row-link" data-section="other" role="button" tabindex="0" title="Read and change your knowledge"><span>Knowledge</span><span>${stored(s.other.words || 0, "word", "words")}</span>${badgeHtml(bo)}</li>
+    <li class="row-link" data-section="facts" role="button" tabindex="0" title="Read and change the facts the AI knows"><span>Facts</span><span>${stored(s.facts.words || 0, "word", "words")}</span>${badgeHtml(bf)}</li>
+    <li class="row-link" data-section="learned" role="button" tabindex="0" title="Read and change what the AI has learned on its own"><span>AI Learned</span><span>${stored(learnedCount, "fact", "facts")}</span>${badgeHtml(bl)}</li>
   `;
 }
 
@@ -248,6 +253,12 @@ async function previewAvatar() {
 
 async function runUpdateSection(section) {
   setOnboardingView(true);
+  if (section === "learned") {
+    await openLearnedEditor(); // its own file: nothing in the profile changes, so there is nothing else to save
+    setOnboardingView(false);
+    renderProfileHome();
+    return;
+  }
   if (section === "scan") {
     const { runPhotoStep } = await import("/static/photo-capture.js?v=16");
     const result = await runPhotoStep(root, state.canonicalName, api);
@@ -256,7 +267,7 @@ async function runUpdateSection(section) {
     const { runVoiceStep } = await import("/static/voice-capture.js?v=11");
     const result = await runVoiceStep(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
-  } else if ((await openOtherEditor()) === false) {
+  } else if ((await openFactsEditor()) === false) {
     setOnboardingView(false); // cancelled: nothing was changed, so nothing is saved
     renderProfileHome();
     return;
@@ -342,16 +353,46 @@ async function finishDeleteProfile() {
   showProfileChooser(); // the deleted profile is gone from the list: straight back to Profile Management
 }
 
-async function openOtherEditor() {
-  const o = state.profile?.other_preview || {};
+/** What the AI noted on its own while talking: one fact per line, for the person to read, fix or delete. Facts always win over it. */
+async function openLearnedEditor() {
+  const got = await api("/api/learned/get", { canonical_name: state.canonicalName });
+  const name = state.profile?.display_name || state.canonicalName;
   root.innerHTML = `
-    <section class="step-card step-card--center step-card--knowledge">
-      <h2 class="step-title">Knowledge</h2>
-      <p class="muted knowledge-blurb">This is what the AI knows about ${escapeHtml(o.display_name || state.canonicalName)}. Write anything you want it to know and remember: who they are or were, their family and friends, the things they love or loved, their way of speaking, the stories they tell or told. The AI keeps this as background and brings it up naturally in conversation, the way a person recalls things. The more you write, the more it will feel like them.</p>
-      <textarea id="other-notes" class="knowledge-text" rows="12" placeholder="Born in ... Grew up in ... Loves (or loved) ... Often says (or said) ... Best friend ...">${escapeHtml(o.notes || "")}</textarea>
+    <section class="step-card step-card--center step-card--facts">
+      <h2 class="step-title">AI Learned</h2>
+      <p class="muted facts-blurb">These are things ${escapeHtml(name)} picked up on its own while talking with you, such as a birthday you told it or something you like. It uses them in conversation, but what you wrote under Facts always wins if the two disagree. Fix or delete anything that is wrong: one fact per line.</p>
+      <textarea id="learned-text" class="facts-text" rows="12" placeholder="Nothing yet. As you talk, the AI will write the things it learns here.">${escapeHtml((got.lines || []).join("\n"))}</textarea>
       <div class="step-actions step-actions--row">
-        <button type="button" class="btn-ghost" id="other-cancel">Cancel</button>
-        <button type="button" class="btn-primary" id="other-save">Save</button>
+        <button type="button" class="btn-ghost" id="learned-cancel">Cancel</button>
+        <button type="button" class="btn-primary" id="learned-save">Save</button>
+      </div>
+    </section>`;
+  return new Promise((resolve) => {
+    const hb = document.getElementById("logout-btn");
+    if (hb) hb.style.display = "none";
+    const finish = (v) => {
+      if (hb) hb.style.display = "";
+      resolve(v);
+    };
+    document.getElementById("learned-cancel").onclick = () => finish(false);
+    document.getElementById("learned-save").onclick = async () => {
+      const r = await api("/api/learned/save", { canonical_name: state.canonicalName, text: document.getElementById("learned-text").value });
+      if (state.profile?.sections) state.profile.sections.learned = { count: r.count };
+      finish(true);
+    };
+  });
+}
+
+async function openFactsEditor() {
+  const o = state.profile?.facts_preview || {};
+  root.innerHTML = `
+    <section class="step-card step-card--center step-card--facts">
+      <h2 class="step-title">Facts</h2>
+      <p class="muted facts-blurb">This is what the AI treats as true about ${escapeHtml(o.display_name || state.canonicalName)}. Write anything you want it to know and remember: who they are or were, their family and friends, the things they love or loved, their way of speaking, the stories they tell or told. The AI keeps this as background and brings it up naturally in conversation. Anything it picks up on its own later goes under AI Learned, and what you write here always wins. The more you write, the more it will feel like them.</p>
+      <textarea id="facts-text" class="facts-text" rows="12" placeholder="Born in ... Grew up in ... Loves (or loved) ... Often says (or said) ... Best friend ...">${escapeHtml(o.notes || "")}</textarea>
+      <div class="step-actions step-actions--row">
+        <button type="button" class="btn-ghost" id="facts-cancel">Cancel</button>
+        <button type="button" class="btn-primary" id="facts-save">Save</button>
       </div>
     </section>`;
   return new Promise((resolve) => {
@@ -359,12 +400,12 @@ async function openOtherEditor() {
     if (hb) hb.style.display = "none"; // this screen has its own Cancel and Save
     const done = resolve;
     resolve = (v) => { if (hb) hb.style.display = ""; done(v); };
-    document.getElementById("other-cancel").onclick = () => resolve(false); // leave without changing anything
-    document.getElementById("other-save").onclick = async () => {
-      const result = await api("/api/capture/other", {
+    document.getElementById("facts-cancel").onclick = () => resolve(false); // leave without changing anything
+    document.getElementById("facts-save").onclick = async () => {
+      const result = await api("/api/capture/facts", {
         canonical_name: state.canonicalName,
-        display_name: o.display_name || state.canonicalName, // the name is set when the profile is made; this screen only changes the knowledge
-        notes: document.getElementById("other-notes").value,
+        display_name: o.display_name || state.canonicalName, // the name is set when the profile is made; this screen only changes the facts
+        notes: document.getElementById("facts-text").value,
         clear: true, // the editor is where the person chooses what the notes say, including nothing
       });
       state.profile = result.profile;
@@ -381,11 +422,11 @@ function emptyProfileSummary(canonicalName) {
     sections: {
       scan: { complete: false, count: 0 },
       voice: { complete: false, count: 0 },
-      other: { complete: false },
+      facts: { complete: false },
     },
     scan_previews: [],
     voice_phases: [],
-    other_preview: {},
+    facts_preview: {},
     avatar_ready: false,
   };
 }
@@ -402,7 +443,7 @@ async function renderAvatar(result, afterUpdate = false) {
   const mode = result?.avatar_mode || (profile?.avatar_ready ? "live" : "placeholder");
   root.innerHTML = `<section class="card avatar-stage" id="avatar-stage"></section>`;
   const stage = document.getElementById("avatar-stage");
-  const { mountAvatarPlayer } = await import("/static/avatar-player.js?v=141");
+  const { mountAvatarPlayer } = await import("/static/avatar-player.js?v=142");
   avatarTeardown = mountAvatarPlayer(stage, profile || {}, {
     onBackProfile: () => {
       avatarTeardown?.();
@@ -447,7 +488,7 @@ import {
   runSetupPipeline,
   setOnboardingView,
   setPhaseLabels,
-} from "/static/onboarding-flow.js?v=25";
+} from "/static/onboarding-flow.js?v=26";
 
 /** Startup screen: the chat brain, ears, speech engine and video animation load once, here, so everything is ready when a person is picked. */
 const STARTUP_ROWS = [

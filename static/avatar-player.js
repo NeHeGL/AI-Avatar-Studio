@@ -120,9 +120,12 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
     }
     const row = document.createElement("p");
     row.className = `chat-line ${who}`;
-    const prefix = who === "you" ? "You: " : `${name}: `;
+    const prefix = who === "you" ? "You: " : who === "note" ? "" : `${name}: `;
     logEl.appendChild(row);
-    if (who !== "you") {
+    if (who === "note") {
+      row.textContent = text;
+      logEl.scrollTop = logEl.scrollHeight;
+    } else if (who !== "you") {
       // the words appear as they are spoken: revealed across the length of the speech
       const words = text.split(/\s+/).filter(Boolean);
       const total = (Number.isFinite(durSec) && durSec > 0.3 ? durSec : words.length * 0.33) * 940;
@@ -238,10 +241,22 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
     }
   });
 
+  // "Noted: ...": when the AI writes something it learned into its notes (the AI Learned screen), the conversation says so
+  const newsTimer = setInterval(async () => {
+    if (destroyed || !profile.canonical_name) return;
+    try {
+      const j = await (await fetch(`/api/learned/news?name=${encodeURIComponent(profile.canonical_name)}`, { cache: "no-store" })).json();
+      for (const f of j.facts || []) addLine("note", `Noted: ${f}`);
+    } catch {
+      /* the server is busy: try again in a moment */
+    }
+  }, 3000);
+
   void startChat();
 
   return () => {
     destroyed = true;
+    clearInterval(newsTimer);
     document.body.classList.remove("wide-stage");
     audio?.pause();
     chat?.stop();

@@ -3,7 +3,11 @@
 Measured GPU memory (Windows, 4k context): chat brain Gemma 3 12B Q4 = 8.4 GB, Gemma 3 4B Q4 = about 3.3 GB; video animation 6.8 GB;
 voice (Qwen3-TTS 1.7B) about 4.6 GB at its peak; ears Whisper large-v3 turbo 2.1 GB, Whisper small about 0.6 GB (on the CPU it takes about 3 s per 8 s of speech). Everything has to share the card with the desktop.
 
-AVATAR_VRAM_GB=16 pretends the card has that much (for testing a smaller tier).
+To test a smaller card for real, on a bigger one: reserve the difference, then pretend. For a 16 GB card on a 32 GB one:
+  python -m app.hardware --reserve 16223        (holds that many MiB of graphics memory; leave it running)
+  set AVATAR_VRAM_GB=16 and AVATAR_VRAM_RESERVED_MIB=16223, then start the app as usual.
+The app then picks the 16 GB models, has only 16 GB left to live in (together with Windows), and the footer shows the card as 16 GB with the
+reserve taken off the usage.
 """
 from __future__ import annotations
 
@@ -36,6 +40,14 @@ def vram_gb() -> float:
         return 0.0
 
 
+def reserved_gb() -> float:
+    """Graphics memory held back on purpose to imitate a smaller card (AVATAR_VRAM_RESERVED_MIB, see above); 0 normally."""
+    try:
+        return max(0.0, float(os.environ.get("AVATAR_VRAM_RESERVED_MIB", "0") or 0)) / 1024
+    except ValueError:
+        return 0.0
+
+
 @lru_cache(maxsize=1)
 def tier() -> dict:
     gb = vram_gb()
@@ -53,4 +65,21 @@ def tier() -> dict:
 
 
 if __name__ == "__main__":
+    import sys
+
+    if "--reserve" in sys.argv:  # hold graphics memory (MiB) until this program is stopped; see the top of this file
+        import time
+
+        import torch
+
+        mib = int(sys.argv[sys.argv.index("--reserve") + 1])
+        held = []
+        left = max(0, mib - 400)  # the program's own CUDA context takes about 400 MiB, so the total held is what was asked for
+        while left > 0:
+            n = min(512, left)
+            held.append(torch.empty(n * 1024 * 1024, dtype=torch.uint8, device="cuda"))
+            left -= n
+        print(f"holding about {mib} MiB of graphics memory", flush=True)
+        while True:
+            time.sleep(5)
     print(tier())
