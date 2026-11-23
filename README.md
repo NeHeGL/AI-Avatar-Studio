@@ -6,6 +6,8 @@
 
 I made this because I want to bring people back from the dead, even just for a conversation. You tell it about the person, give it their face and their voice, and it tries to be them: it knows their family, their stories, how they talked, and it answers out loud, with their face, in their voice.
 
+![The chat screen: the avatar on the left, the conversation on the right](https://raw.githubusercontent.com/NeHeGL/AI-Avatar-Studio/main/app_image.jpg)
+
 ## What it does
 
 - **Learns the person.** A Facts page holds everything you know about them (birthday, family, interests, how their name is pronounced, how they spoke). The avatar uses it in conversation and works out how the person comes across from what you wrote.
