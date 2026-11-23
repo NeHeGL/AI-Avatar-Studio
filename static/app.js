@@ -541,7 +541,7 @@ async function waitForStartup() {
         row.querySelector(".startup-bar i").style.width = st === "download" ? `${pct}%` : "0";
       }
       const note = document.getElementById("startup-note");
-      if (note && Date.now() - t0 > 90000 && !Object.values(r.pct || {}).some((v) => v > 0 && v < 100)) note.textContent = "This is taking a long time. If it never finishes, run install.bat and start again.";
+      if (note && Date.now() - t0 > 90000 && !Object.values(r.pct || {}).some((v) => v > 0 && v < 100)) note.textContent = "This is taking a long time. If it never finishes, close the app and start it again: the download picks up where it stopped.";
     }
     await new Promise((res) => setTimeout(res, 500));
     r = await get();

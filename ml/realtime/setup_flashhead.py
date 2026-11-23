@@ -9,6 +9,7 @@ import io
 import shutil
 import subprocess
 import sys
+import threading
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -30,6 +31,22 @@ REQUIRED = [
 
 def complete() -> bool:
     return all((FH / r).exists() for r in REQUIRED)
+
+
+# What the model downloads add up to when finished (measured: 8.54 GB), to show a percentage.
+EXPECTED_BYTES = 8_540_000_000
+
+
+def _bytes_on_disk(models: Path) -> int:
+    """Everything downloaded so far, including files still being written."""
+    total = 0
+    for p in models.rglob("*"):
+        try:
+            if p.is_file():
+                total += p.stat().st_size
+        except OSError:
+            pass  # a file that was just renamed into place
+    return total
 
 
 def run(*args: str, check: bool = True) -> int:
@@ -62,28 +79,24 @@ def main(base_python: str, cb=None) -> int:
     models = FH / "models"
     if not complete():
         from huggingface_hub import snapshot_download
-        from tqdm.auto import tqdm
 
-        bars: dict[int, tuple[float, float]] = {}
+        # Progress is measured from the bytes on disk (the downloader's own progress bars are not reliable: they stayed at 0% for the whole
+        # download). Files being downloaded count as they grow, and a resumed download starts from where it stopped.
+        stop = threading.Event()
 
-        class _Bar(tqdm):
-            def __init__(self, *a, **k):
-                k.pop("name", None)
-                super().__init__(*a, **k)
-
-            def update(self, n=1):
-                r = super().update(n)
-                if self.total and self.total > 1_000_000:
-                    bars[id(self)] = (self.n, self.total)
-                    done, total = (sum(v[i] for v in bars.values()) for i in (0, 1))
-                    say("download", min(99, int(100 * done / max(total, 1))))
-                return r
+        def watch() -> None:
+            while not stop.wait(1.5):
+                say("download", min(99, int(100 * _bytes_on_disk(models) / EXPECTED_BYTES)))
 
         say("download", 0)
-        snapshot_download("Soul-AILab/SoulX-FlashHead-1_3B", local_dir=str(models / "SoulX-FlashHead-1_3B"),
-                          allow_patterns=["Model_Lite/*", "VAE_LTX/*", "*.json", "*.md", "*.txt"], tqdm_class=_Bar)
-        snapshot_download("facebook/wav2vec2-base-960h", local_dir=str(models / "wav2vec2-base-960h"),
-                          allow_patterns=["*.json", "*.txt", "*.safetensors", "*.bin"], tqdm_class=_Bar)
+        threading.Thread(target=watch, daemon=True).start()
+        try:
+            snapshot_download("Soul-AILab/SoulX-FlashHead-1_3B", local_dir=str(models / "SoulX-FlashHead-1_3B"),
+                              allow_patterns=["Model_Lite/*", "VAE_LTX/*", "*.json", "*.md", "*.txt"])
+            snapshot_download("facebook/wav2vec2-base-960h", local_dir=str(models / "wav2vec2-base-960h"),
+                              allow_patterns=["*.json", "*.txt", "*.safetensors", "*.bin"])
+        finally:
+            stop.set()
     print("Video renderer ready.")
     return 0
 
