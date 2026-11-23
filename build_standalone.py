@@ -1,4 +1,4 @@
-"""Build the release: dist/AI Avatar Studio.exe and dist/README.md (the two files a GitHub release carries).
+"""Build the release: dist/AI-Avatar-Studio.exe and dist/README.md (the two files a GitHub release carries).
 
   python build_standalone.py [version]        (or double-click "Build Standalone.bat")
 
@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
-NAME = "AI Avatar Studio"
+NAME = "AI-Avatar-Studio"
 
 FILES = [
     "installer.py", "run.py", "start_all.py", "requirements.txt", "README.md", "LICENSE",

@@ -1,13 +1,13 @@
-"""AI Avatar Studio.exe: unpacks the app next to itself, sets up Python and the packages the first time, then starts it.
+"""AI-Avatar-Studio.exe: unpacks the app next to itself, sets up Python and the packages the first time, then starts it.
 
 The .exe carries the app's own files (payload.zip) and the `uv` tool (uv.exe), so nothing has to be installed first, not even Python. It is
 built by build_standalone.py. Put it in the folder (or on the drive) where you want the app and its downloads to live (about 30 GB in all): it
 creates an "AI Avatar Studio" folder beside itself.
 
-  "AI Avatar Studio.exe"              set up whatever is missing, then start the app
-  "AI Avatar Studio.exe" --check      unpack and report what would be done; installs nothing, starts nothing
-  "AI Avatar Studio.exe" --dry-run    also create the Python environment and resolve the packages, without downloading them
-  "AI Avatar Studio.exe" --install-only   set up the Python environment and packages, but do not start the app
+  "AI-Avatar-Studio.exe"              set up whatever is missing, then start the app
+  "AI-Avatar-Studio.exe" --check      unpack and report what would be done; installs nothing, starts nothing
+  "AI-Avatar-Studio.exe" --dry-run    also create the Python environment and resolve the packages, without downloading them
+  "AI-Avatar-Studio.exe" --install-only   set up the Python environment and packages, but do not start the app
 """
 from __future__ import annotations
 
