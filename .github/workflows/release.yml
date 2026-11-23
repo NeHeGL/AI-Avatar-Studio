@@ -1,8 +1,9 @@
 name: Release
 
 # Run by hand: Actions > Release > Run workflow, and type the version (e.g. v1.0.0).
-# It runs build_standalone.py and publishes the zip it makes as a GitHub Release.
-# "dry run" builds the zip and attaches it to the run, without tagging or publishing anything.
+# It builds "AI Avatar Studio.exe" with build_standalone.py (on Windows: a Windows .exe can only be built on Windows) and publishes it,
+# together with README.md, as a GitHub Release.
+# "dry run" builds the files and attaches them to the run, without tagging or publishing anything.
 
 on:
   workflow_dispatch:
@@ -11,13 +12,13 @@ on:
         description: 'Version to release (e.g. v1.0.0)'
         required: true
       dry_run:
-        description: 'Dry run: build the zip, but do not tag or publish'
+        description: 'Dry run: build the files, but do not tag or publish'
         type: boolean
         default: false
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     permissions:
       contents: write
     env:
@@ -28,6 +29,7 @@ jobs:
         uses: actions/checkout@v4.2.2
 
       - name: Check the version
+        shell: bash
         run: |
           if ! [[ "$VER" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Version must look like v1.0.0 (got '$VER')"; exit 1
@@ -36,20 +38,21 @@ jobs:
             echo "::error::Tag $VER already exists. Pick a new version."; exit 1
           fi
 
-      - name: Set up Python
-        uses: actions/setup-python@v5.6.0
-        with:
-          python-version: '3.11'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
 
-      - name: Build the release zip
-        run: python build_standalone.py "$VER"
+      - name: Build the .exe
+        shell: bash
+        run: uv run --no-project --python 3.11 build_standalone.py "$VER"
 
-      - name: Dry run - attach the zip to this run
+      - name: Dry run - attach the files to this run
         if: ${{ inputs.dry_run }}
         uses: actions/upload-artifact@v4
         with:
           name: dry-run-${{ inputs.version }}
-          path: dist/Avatar-Studio-*.zip
+          path: |
+            dist/AI Avatar Studio.exe
+            dist/README.md
 
       - name: Create the tag and the GitHub Release
         if: ${{ !inputs.dry_run }}
@@ -58,17 +61,20 @@ jobs:
           tag_name: ${{ inputs.version }}
           target_commitish: ${{ github.sha }}
           name: "AI Avatar Studio ${{ inputs.version }}"
-          files: dist/Avatar-Studio-*.zip
+          files: |
+            dist/AI Avatar Studio.exe
+            dist/README.md
           body: |
             ## AI Avatar Studio ${{ inputs.version }}
 
             ### Install
-            1. Download **Avatar-Studio-${{ inputs.version }}.zip** below (not the automatic "Source code" files)
-            2. Extract it anywhere
-            3. Double-click `Start AI Avatar Studio App.bat` (own window) or `Start AI Avatar Studio Web.bat` (browser tab).
-               The first launch runs `install.bat`, which downloads and sets up everything.
+            1. Download **AI Avatar Studio.exe** below (not the automatic "Source code" files)
+            2. Put it in the folder, or on the drive, where you want the app and its downloads to live (about 25 GB)
+            3. Double-click it. The first run unpacks the app beside it, installs Python and the packages, and starts the app; the chat model, video engine and voice (about 14 GB) download with progress on the start screen. After that it starts straight away.
+
+            Windows may warn about an unknown publisher because the program is not signed: choose **More info**, then **Run anyway**.
 
             ### Requirements
-            - Windows 10/11 (64-bit), Python 3.11 installed
-            - An NVIDIA graphics card (RTX 20-series or newer, 12 GB of video memory or more recommended)
+            - Windows 10/11 (64-bit). You do not need to install Python.
+            - An NVIDIA graphics card (RTX 20-series or newer; 16 GB of video memory works, 32 GB is best)
             - About 25 GB of free disk space for the one-time install, and an internet connection for it

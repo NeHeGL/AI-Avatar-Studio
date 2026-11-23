@@ -33,14 +33,18 @@ A conversation feels dead if every reply has a pause in front of it. A lot of th
 
 On a 16 GB card it fits, with about 1 GB to spare. Tested by reserving the rest of a larger card, so that Windows and the app had exactly 16 GB: it loaded, transcribed speech and answered four turns in a row with no memory errors, using about 11.5 GB when idle and 12.5 GB while it answers, plus Windows' own share, for a peak of about 15 GB. The first sound took 7 to 10 seconds. Close other programs that use the graphics card (browsers playing video, games). It has not been run on a real 16 GB card, whose speed will differ.
 
-Windows 10/11, an NVIDIA card (RTX 20-series or newer), Python 3.11, and about 25 GB of free disk space. The first start downloads about 14 GB of models, once.
+Windows 10/11, an NVIDIA card (RTX 20-series or newer), and about 25 GB of free disk space (Python 3.11 only if you run from the source code). The first start downloads about 14 GB of models, once.
 
 ## Install and run
 
-1. Install Python 3.11 (tick "Add Python to PATH").
-2. Double-click **Start AI Avatar Studio App.bat** (own window) or **Start AI Avatar Studio Web.bat** (browser tab). If anything is missing, the first launch runs **install.bat** for you.
+1. Download **AI Avatar Studio.exe** from the latest [Release](../../releases) and put it in the folder, or on the drive, where you want the app and its downloads to live (about 25 GB).
+2. Double-click it. The first run unpacks the app into an `AI Avatar Studio` folder beside it, installs Python and the packages itself (you do not need to install Python), and starts the app. The chat model, video engine and voice (about 14 GB) download with progress on the app's start screen. After that it starts straight away.
 
-**Stop AI Avatar Studio.bat** closes everything. **Build Standalone.bat** makes the release zip in `dist/`.
+Windows may warn about an unknown publisher, because the program is not signed: choose **More info**, then **Run anyway**.
+
+### Running from the source code
+
+Install Python 3.11 (tick "Add Python to PATH"), then double-click **Start AI Avatar Studio App.bat** (own window) or **Start AI Avatar Studio Web.bat** (browser tab). If anything is missing, the first launch runs **install.bat** for you. **Stop AI Avatar Studio.bat** closes everything. **Build Standalone.bat** builds the release files (`AI Avatar Studio.exe` and `README.md`) into `dist/`; it needs [uv](https://docs.astral.sh/uv/).
 
 ### Use your own chat model
 

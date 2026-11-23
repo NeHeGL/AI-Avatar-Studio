@@ -1,4 +1,5 @@
 @echo off
 cd /d "%~dp0"
-if exist "ml\.venv\Scripts\python.exe" ("ml\.venv\Scripts\python.exe" build_standalone.py) else (python build_standalone.py)
+:: Builds dist\AI Avatar Studio.exe and dist\README.md (needs uv: https://docs.astral.sh/uv/)
+uv run --no-project --python 3.11 build_standalone.py %1
 pause

@@ -104,6 +104,7 @@ class NoCacheStatic(StaticFiles):
 
 
 app.mount("/static", NoCacheStatic(directory=STATIC), name="static")
+DATA_ROOT.mkdir(parents=True, exist_ok=True)  # a fresh install has no data folder yet, and the mount below needs it
 app.mount("/data", NoCacheStatic(directory=DATA_ROOT), name="data")
 
 
