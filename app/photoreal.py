@@ -1,7 +1,7 @@
 """Prepare a person's photo for the photo-real avatar (live idle face, reply videos, optional clips).
 
 Works from whatever the person has: a single photo is enough; a high-resolution wide scan frame is better.
-The result is data/profiles/<user>/media/cinematic/source.jpg, the one picture every photo-real layer is built from, so the
+The result is data/profiles/<user>/cache/face/source.jpg, the one picture every photo-real layer is built from, so the
 framing never changes between the idle face, the pre-made clips and the live reply videos.
 """
 from __future__ import annotations
@@ -14,11 +14,11 @@ import cv2
 import numpy as np
 
 from app.profile_logic import face_assets, pick_avatar_face
-from app.storage import get_working_profile, media_dir
+from app.storage import cache_dir, get_working_profile, photo_dir
 
 
-def cinematic_dir(canonical_name: str) -> Path:
-    return media_dir(canonical_name) / "cinematic"
+def face_dir(canonical_name: str) -> Path:
+    return cache_dir(canonical_name) / "face"
 
 
 _YUNET = Path(__file__).resolve().parent.parent / "ml" / "realtime" / "models" / "face_detection_yunet_2023mar.onnx"
@@ -137,18 +137,18 @@ def _clean_borders(img: np.ndarray) -> np.ndarray:
 
 def ensure_source(canonical_name: str, force: bool = False) -> Path | None:
     """Return the prepared source photo, creating it from the person's best scan photo if needed."""
-    out = cinematic_dir(canonical_name) / "source.jpg"
+    out = face_dir(canonical_name) / "source.jpg"
     if out.exists() and not force:
         return out
     try:
         profile = get_working_profile(canonical_name)
         photo_path: Path | None = None
-        # an explicit choice stored with the person's media (cinematic/options.json -> "source_photo") wins: it survives profile
+        # an explicit choice stored with the person's cache (face/options.json -> "source_photo") wins: it survives profile
         # data being reverted, and it keeps the picture every clip was made from from silently changing
         try:
             chosen = json.loads((out.parent / "options.json").read_text(encoding="utf-8")).get("source_photo")
-            if chosen and (out.parent.parent / "scan" / chosen).exists():
-                photo_path = out.parent.parent / "scan" / chosen
+            if chosen and (photo_dir(canonical_name) / chosen).exists():
+                photo_path = photo_dir(canonical_name) / chosen
         except Exception:
             pass
         if photo_path is None:
@@ -206,12 +206,11 @@ def ensure_source(canonical_name: str, force: bool = False) -> Path | None:
 
 def invalidate(canonical_name: str, keep_pin: bool = False) -> list[str]:
     """Throw away everything that was made from the person's current source photo: the prepared photo, the cut-out, the whole
-    animation set, and the pre-made clips (they were rendered from that photo and would no longer match). Call this when the
-    photo changes or the person is rescanned; the next time the page opens, a new photo is prepared and everything is rebuilt
-    from it. The pre-made clips are moved to cinematic/stale/ (not deleted) in case they are wanted back."""
+    animation set and the reply videos (they were made from that photo and would no longer match). Call this when the photo changes;
+    the next time the page opens, a new photo is prepared and everything is rebuilt from it."""
     import shutil
 
-    d = cinematic_dir(canonical_name)
+    d = face_dir(canonical_name)
     done: list[str] = []
     for name in ("idle_bank",):
         if (d / name).exists():
@@ -221,12 +220,9 @@ def invalidate(canonical_name: str, keep_pin: bool = False) -> list[str]:
         if (d / name).exists():
             (d / name).unlink(missing_ok=True)
             done.append(name)
-    stale = d / "stale"
-    for f in list(d.glob("*.mp4")) + [d / "manifest.json"]:
-        if f.exists():
-            stale.mkdir(exist_ok=True)
-            shutil.move(str(f), str(stale / f.name))
-            done.append(f.name)
+    for old in (d.parent / "talk").glob("reply_*.mp4"):  # spoken replies made from the old face
+        old.unlink(missing_ok=True)
+        done.append(old.name)
     if not keep_pin:  # a new scan means a new best photo: forget the pinned one (other options, like glasses, stay)
         try:
             o = d / "options.json"
@@ -246,7 +242,7 @@ def prepare_talk_person(canonical_name: str) -> None:
     import urllib.parse
     import urllib.request
 
-    src = cinematic_dir(canonical_name) / "source.jpg"
+    src = face_dir(canonical_name) / "source.jpg"
     if not src.exists():
         return
 
@@ -265,8 +261,8 @@ def status(canonical_name: str) -> dict:
     src = ensure_source(canonical_name)
     if src:
         prepare_talk_person(canonical_name)
-    d = cinematic_dir(canonical_name)
-    return {"has_source": bool(src), "has_clips": (d / "manifest.json").exists(), "source_px": _px(d / "source_info.json")}
+    d = face_dir(canonical_name)
+    return {"has_source": bool(src), "source_px": _px(d / "source_info.json")}
 
 
 def _px(info: Path) -> int:

@@ -10,7 +10,6 @@ import math
 from pathlib import Path
 
 import cv2
-import numpy as np
 
 _MODEL = Path(__file__).resolve().parent.parent / "static" / "vendor" / "mediapipe" / "face_landmarker.task"
 _landmarker = None
@@ -105,15 +104,3 @@ def rank_photos(paths: list[Path]) -> list[dict]:
     rows.sort(key=lambda r: -r["score"])
     return rows
 
-
-def describe(r: dict) -> str:
-    """One plain sentence on why a photo was (or was not) a good pick."""
-    if not r.get("face"):
-        return "no face found in it"
-    bits = []
-    bits.append("looking at the camera" if r["turn"] < 0.12 else "slightly turned" if r["turn"] < 0.3 else "turned away")
-    bits.append("eyes open" if r["blink"] < 0.2 else "eyes partly closed")
-    bits.append("smiling" if r["smile"] >= 0.3 else "no smile" if r["smile"] < 0.1 else "a slight smile")
-    if not r["head_in_frame"]:
-        bits.append("head touches the edge")
-    return ", ".join(bits)

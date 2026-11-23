@@ -41,7 +41,7 @@ function logOut() {
   state.enteredName = "";
   state.canonicalName = "";
   state.profile = null;
-  setCinematicMode(false);
+  setOnboardingView(false);
   updateLogout();
   showProfileChooser(); // straight back to the Profile Management screen (no Hello screen)
 }
@@ -55,7 +55,7 @@ async function submitName(name, fromList = false) {
   }
   const result = await api("/api/walkthrough/check-name", { name: state.enteredName });
   if (result.status === "exists") {
-    setCinematicMode(false);
+    setOnboardingView(false);
     state.profile = result.profile_summary;
     if (fromList) {
       await confirmExisting(true); // picked from the list: nothing to confirm, open it
@@ -105,7 +105,7 @@ function sectionBadge(kind, s) {
     return { cls: "pending", text: "Required", tip: "The avatar needs a voice recording" };
   }
   if (s.other.complete) return { cls: "done", text: "✓", tip: s.other.words ? plural(s.other.words, "word", "words") + " of knowledge" : "Display name set" };
-  return { cls: "optional", text: "Optional", tip: "Notes about this person make the avatar know them better" };
+  return { cls: "optional", text: "Optional", tip: "Tell the AI about this person so it knows them better" };
 }
 const badgeHtml = (b) => `<span class="badge ${b.cls}" title="${b.tip}">${b.text}</span>`;
 
@@ -121,7 +121,7 @@ function renderSectionsList(profile) {
   ul.innerHTML = `
     <li class="stats-head"><span>Step</span><span>Records Stored</span><span>Contains Data</span></li>
     <li class="row-link" data-section="scan" role="button" tabindex="0" title="See and change your photos"><span>Photo</span><span>${stored(s.scan.count, "photo", "photos")}</span>${badgeHtml(bs)}</li>
-    <li class="row-link" data-section="voice" role="button" tabindex="0" title="Listen to and change your recordings"><span>Voice Scan</span><span>${stored(s.voice.count, "recording", "recordings")}</span>${badgeHtml(bv)}</li>
+    <li class="row-link" data-section="voice" role="button" tabindex="0" title="Listen to and change your recordings"><span>Voice</span><span>${stored(s.voice.count, "recording", "recordings")}</span>${badgeHtml(bv)}</li>
     <li class="row-link" data-section="other" role="button" tabindex="0" title="Read and change your knowledge"><span>Knowledge</span><span>${stored(s.other.words || 0, "word", "words")}</span>${badgeHtml(bo)}</li>
   `;
 }
@@ -178,7 +178,7 @@ async function confirmExisting(isYou, uniqueFullName = null) {
 
 async function handleReturningUser() {
   if (!profileCoreComplete(state.profile)) {
-    setCinematicMode(true);
+    setOnboardingView(true);
     root.innerHTML = `
       <section class="step-card step-card--center">
         <p class="step-eyebrow">Welcome back</p>
@@ -205,7 +205,7 @@ async function handleReturningUser() {
 }
 
 function renderProfileHome() {
-  setCinematicMode(false);
+  setOnboardingView(false);
   const name = state.profile?.display_name || state.canonicalName;
   setPhase("", ""); // the profile name is already shown in the card below
   const p = state.profile;
@@ -247,22 +247,22 @@ async function previewAvatar() {
 }
 
 async function runUpdateSection(section) {
-  setCinematicMode(true);
+  setOnboardingView(true);
   if (section === "scan") {
-    const { runPhotoStep } = await import("/static/photo-capture.js?v=15");
+    const { runPhotoStep } = await import("/static/photo-capture.js?v=16");
     const result = await runPhotoStep(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if (section === "voice") {
-    const { runVoiceStep } = await import("/static/voice-capture.js?v=9");
+    const { runVoiceStep } = await import("/static/voice-capture.js?v=11");
     const result = await runVoiceStep(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if ((await openOtherEditor()) === false) {
-    setCinematicMode(false); // cancelled: nothing was changed, so nothing is saved
+    setOnboardingView(false); // cancelled: nothing was changed, so nothing is saved
     renderProfileHome();
     return;
   }
   await saveNewProfile(false);
-  setCinematicMode(false);
+  setOnboardingView(false);
   renderProfileHome();
 }
 
@@ -345,12 +345,10 @@ async function finishDeleteProfile() {
 async function openOtherEditor() {
   const o = state.profile?.other_preview || {};
   root.innerHTML = `
-    <section class="step-card step-card--center">
+    <section class="step-card step-card--center step-card--knowledge">
       <h2 class="step-title">Knowledge</h2>
-      <label class="field-label">Display name</label>
-      <input type="text" class="step-input" id="other-display" value="${escapeAttr(o.display_name || state.canonicalName)}" />
-      <label class="field-label">Notes</label>
-      <textarea id="other-notes" rows="4">${escapeHtml(o.notes || "")}</textarea>
+      <p class="muted knowledge-blurb">This is what the AI knows about ${escapeHtml(o.display_name || state.canonicalName)}. Write anything you want it to know and remember: who they are or were, their family and friends, the things they love or loved, their way of speaking, the stories they tell or told. The AI keeps this as background and brings it up naturally in conversation, the way a person recalls things. The more you write, the more it will feel like them.</p>
+      <textarea id="other-notes" class="knowledge-text" rows="12" placeholder="Born in ... Grew up in ... Loves (or loved) ... Often says (or said) ... Best friend ...">${escapeHtml(o.notes || "")}</textarea>
       <div class="step-actions step-actions--row">
         <button type="button" class="btn-ghost" id="other-cancel">Cancel</button>
         <button type="button" class="btn-primary" id="other-save">Save</button>
@@ -365,7 +363,7 @@ async function openOtherEditor() {
     document.getElementById("other-save").onclick = async () => {
       const result = await api("/api/capture/other", {
         canonical_name: state.canonicalName,
-        display_name: document.getElementById("other-display").value,
+        display_name: o.display_name || state.canonicalName, // the name is set when the profile is made; this screen only changes the knowledge
         notes: document.getElementById("other-notes").value,
         clear: true, // the editor is where the person chooses what the notes say, including nothing
       });
@@ -391,155 +389,8 @@ function emptyProfileSummary(canonicalName) {
     avatar_ready: false,
   };
 }
-
-function renderReturningDashboard() {
-  renderProfileHome();
-}
-
-function renderUpdateChooser() {
-  const p = state.profile;
-  setPhase("Update profile", "Check sections to refresh; low-quality data is dropped automatically.");
-  root.innerHTML = `
-    <section class="card">
-      <h2>Select what to update</h2>
-      <div class="update-grid">
-        <div class="update-block" data-section="scan">
-          <label class="check-head">
-            <input type="checkbox" id="chk-scan" /> Photo
-          </label>
-          <div class="preview" id="prev-scan">
-            <div class="scan-thumbs">${renderScanThumbs(p.scan_previews)}</div>
-          </div>
-        </div>
-        <div class="update-block" data-section="voice">
-          <label class="check-head">
-            <input type="checkbox" id="chk-voice" /> Voice Scan
-          </label>
-          <div class="preview" id="prev-voice">
-            <div class="voice-phases" id="voice-list"></div>
-          </div>
-        </div>
-        <div class="update-block" data-section="other">
-          <label class="check-head">
-            <input type="checkbox" id="chk-other" /> Knowledge
-          </label>
-          <div class="preview" id="prev-other">
-            <div class="other-preview">${escapeHtml(formatOther(p.other_preview))}</div>
-          </div>
-        </div>
-      </div>
-      <div class="btn-row">
-        <button type="button" class="secondary" id="cancel-update">Cancel</button>
-        <button type="button" id="apply-update">Update selected</button>
-        <button type="button" class="secondary" id="skip-avatar">Skip — show avatar</button>
-      </div>
-    </section>
-  `;
-
-  wireUpdateCheckboxes();
-  bindVoicePreviews(p.voice_phases);
-  document.getElementById("cancel-update").onclick = () => renderReturningDashboard();
-  document.getElementById("skip-avatar").onclick = () => skipUpdates();
-  document.getElementById("apply-update").onclick = () => applyUpdates();
-}
-
-function wireUpdateCheckboxes() {
-  document.querySelectorAll(".update-block").forEach((block) => {
-    const cb = block.querySelector('input[type="checkbox"]');
-    cb.addEventListener("change", () => {
-      block.classList.toggle("expanded", cb.checked);
-    });
-  });
-}
-
-function renderScanThumbs(previews) {
-  if (!previews?.length) return `<span class="muted">No scan images yet.</span>`;
-  return previews
-    .map(
-      (x) =>
-        `<img src="${escapeAttr(x.url)}" alt="${escapeAttr(x.caption)}" title="${escapeAttr(x.caption)}" />`
-    )
-    .join("");
-}
-
-function bindVoicePreviews(phases) {
-  const list = document.getElementById("voice-list");
-  if (!list) return;
-  list.innerHTML = phases
-    .map(
-      (ph, i) => `
-    <div class="voice-phase" data-index="${i}" role="button" tabindex="0">
-      <span>${escapeHtml(ph.label)}</span>
-      <div class="waveform">${(ph.peaks || []).map((h) => `<span style="height:${Math.round(h * 100)}%"></span>`).join("")}</div>
-      <span class="badge">${ph.duration_sec?.toFixed(1) ?? "—"}s</span>
-    </div>`
-    )
-    .join("");
-
-  list.querySelectorAll(".voice-phase").forEach((el) => {
-    const idx = Number(el.dataset.index);
-    el.onclick = () => playVoicePhase(phases[idx], el);
-    el.onkeydown = (e) => {
-      if (e.key === "Enter" || e.key === " ") playVoicePhase(phases[idx], el);
-    };
-  });
-}
-
-let audioCtx = null;
 let talkInterval = null;
 let avatarTeardown = null;
-
-function playVoicePhase(phase, el) {
-  document.querySelectorAll(".voice-phase.playing").forEach((n) => n.classList.remove("playing"));
-  el.classList.add("playing");
-
-  if (phase.url) {
-    const a = new Audio(phase.url);
-    a.play();
-    a.onended = () => el.classList.remove("playing");
-    return;
-  }
-
-  const duration = (phase.duration_sec || 2) * 1000;
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
-  osc.frequency.value = 180 + Math.random() * 80;
-  gain.gain.value = 0.08;
-  osc.start();
-  setTimeout(() => {
-    osc.stop();
-    el.classList.remove("playing");
-  }, Math.min(duration, 2500));
-}
-
-async function skipUpdates() {
-  const result = await api("/api/walkthrough/skip-updates", {
-    canonical_name: state.canonicalName,
-  });
-  renderAvatar(result);
-}
-
-async function applyUpdates() {
-  const sections = [];
-  if (document.getElementById("chk-scan")?.checked) sections.push("scan");
-  if (document.getElementById("chk-voice")?.checked) sections.push("voice");
-  if (document.getElementById("chk-other")?.checked) sections.push("other");
-  if (!sections.length) {
-    await skipUpdates();
-    return;
-  }
-  const result = await api("/api/walkthrough/apply-updates", {
-    canonical_name: state.canonicalName,
-    sections,
-    merge_existing: true,
-  });
-  state.profile = result.profile;
-  renderAvatar(result, true);
-}
-
 async function renderAvatar(result, afterUpdate = false) {
   if (talkInterval) clearInterval(talkInterval);
   if (avatarTeardown) {
@@ -551,7 +402,7 @@ async function renderAvatar(result, afterUpdate = false) {
   const mode = result?.avatar_mode || (profile?.avatar_ready ? "live" : "placeholder");
   root.innerHTML = `<section class="card avatar-stage" id="avatar-stage"></section>`;
   const stage = document.getElementById("avatar-stage");
-  const { mountAvatarPlayer } = await import("/static/avatar-player.js?v=120");
+  const { mountAvatarPlayer } = await import("/static/avatar-player.js?v=141");
   avatarTeardown = mountAvatarPlayer(stage, profile || {}, {
     onBackProfile: () => {
       avatarTeardown?.();
@@ -567,126 +418,6 @@ async function renderAvatar(result, afterUpdate = false) {
     stage.appendChild(note);
   }
 }
-
-function renderCapturePreview(profile) {
-  const scans = profile?.scan_previews || [];
-  const voices = profile?.voice_phases || [];
-  const other = profile?.other_preview;
-  const scanHtml = scans.length
-    ? `<div class="scan-thumbs">${scans
-        .map(
-          (x) =>
-            `<img src="${escapeAttr(x.url)}" alt="${escapeAttr(x.caption)}" title="${escapeAttr(x.caption)}" />`
-        )
-        .join("")}</div>`
-    : "<p class='capture-empty'>No photo yet.</p>";
-  const voiceHtml = voices.length
-    ? voices
-        .map(
-          (v) => `
-        <div class="voice-preview-row">
-          <span>${escapeHtml(v.label)}</span>
-          ${v.url ? `<audio controls src="${escapeAttr(v.url)}" preload="none"></audio>` : "<span class='badge'>Recorded</span>"}
-        </div>`
-        )
-        .join("")
-    : "<p class='capture-empty'>No voice yet — start Voice scan.</p>";
-  const otherHtml =
-    other?.notes || other?.display_name
-      ? `<p>${escapeHtml(other.display_name || state.canonicalName)} — ${escapeHtml(other.notes || "")}</p>`
-      : "<p class='capture-empty'>Optional notes not set yet.</p>";
-  return `
-    <section class="capture-preview">
-      <h3>What you've captured (draft)</h3>
-      <div class="capture-block"><strong>Face</strong>${scanHtml}</div>
-      <div class="capture-block"><strong>Voice Scan</strong><div class="voice-preview-list">${voiceHtml}</div></div>
-      <div class="capture-block"><strong>Knowledge</strong>${otherHtml}</div>
-    </section>
-  `;
-}
-
-function renderNewUserFlow() {
-  setPhase("New profile", "Complete scan, voice, and other settings.");
-  const p = state.profile;
-  root.innerHTML = `
-    <section class="card">
-      <h2>Let's set up ${escapeHtml(state.canonicalName)}</h2>
-      <p>Use your camera and microphone below. Progress updates as you finish each step.</p>
-      <ul class="sections-list" id="sections-overview"></ul>
-      ${renderCapturePreview(p)}
-      <div class="btn-row">
-        <button type="button" id="cap-scan">Photo</button>
-        <button type="button" id="cap-voice">Voice Scan</button>
-        <button type="button" id="cap-other">Other details</button>
-      </div>
-      <p class="muted" style="margin-top:1rem;font-size:0.9rem;color:var(--muted)">
-        Saved to a draft on this PC until you click Save profile at the end.
-      </p>
-      <div class="btn-row" style="margin-top: 1rem;">
-        <button type="button" id="finish-new">Save profile &amp; show avatar</button>
-      </div>
-    </section>
-  `;
-  renderSectionsList(p);
-
-  document.getElementById("cap-scan").onclick = () => runScanFlow();
-  document.getElementById("cap-voice").onclick = () => runVoiceFlow();
-  document.getElementById("cap-other").onclick = () => runOtherFlow();
-  document.getElementById("finish-new").onclick = () => saveNewProfile();
-}
-
-async function runScanFlow() {
-  const { runPhotoStep } = await import("/static/photo-capture.js?v=15");
-  const result = await runPhotoStep(root, state.canonicalName, api);
-  if (result?.profile) {
-    state.profile = result.profile;
-    renderNewUserFlow();
-    setPhase("Photo", "Photo saved to your draft.");
-  } else {
-    renderNewUserFlow();
-  }
-}
-
-async function runVoiceFlow() {
-  const { runVoiceCapture } = await import("/static/voice-capture.js?v=9");
-  const result = await runVoiceCapture(root, state.canonicalName, api);
-  if (result?.profile) {
-    state.profile = result.profile;
-    renderNewUserFlow();
-    setPhase("Voice Scan", "Recording saved to your draft.");
-  } else {
-    renderNewUserFlow();
-  }
-}
-
-function runOtherFlow() {
-  const o = state.profile?.other_preview || {};
-  root.innerHTML = `
-    <section class="card">
-      <h2>Other details</h2>
-      <p>Optional: how your avatar should introduce itself, tone, etc.</p>
-      <label class="field-label">Display name</label>
-      <input type="text" id="other-display" value="${escapeAttr(o.display_name || state.canonicalName)}" />
-      <label class="field-label">Notes</label>
-      <textarea id="other-notes" rows="4" placeholder="e.g. casual tone, slower speech">${escapeHtml(o.notes || "")}</textarea>
-      <div class="btn-row">
-        <button type="button" class="secondary" id="other-back">Back</button>
-        <button type="button" id="other-save">Save</button>
-      </div>
-    </section>
-  `;
-  document.getElementById("other-back").onclick = () => renderNewUserFlow();
-  document.getElementById("other-save").onclick = async () => {
-    const result = await api("/api/capture/other", {
-      canonical_name: state.canonicalName,
-      display_name: document.getElementById("other-display").value,
-      notes: document.getElementById("other-notes").value,
-    });
-    state.profile = result.profile;
-    renderNewUserFlow();
-  };
-}
-
 async function saveNewProfile(thenAvatar = true) {
   const result = await api("/api/walkthrough/save-profile", {
     canonical_name: state.canonicalName,
@@ -698,22 +429,6 @@ async function saveNewProfile(thenAvatar = true) {
   state.profile = result.profile;
   if (thenAvatar) renderAvatar(result);
 }
-
-async function captureStub(section) {
-  const result = await api("/api/walkthrough/capture-stub", {
-    canonical_name: state.canonicalName,
-    section,
-  });
-  state.profile = result.profile;
-  renderNewUserFlow();
-  setPhase("Capture", `${section} saved.`);
-}
-
-function formatOther(o) {
-  if (!o) return "No knowledge entered yet.";
-  return `Display: ${o.display_name || "—"}\nNotes: ${o.notes || "—"}\nPreferences: ${JSON.stringify(o.preferences || {}, null, 2)}`;
-}
-
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, "&amp;")
@@ -730,15 +445,15 @@ import {
   renderHelloIntro,
   renderNameStep,
   runSetupPipeline,
-  setCinematicMode,
+  setOnboardingView,
   setPhaseLabels,
-} from "/static/onboarding-flow.js?v=24";
+} from "/static/onboarding-flow.js?v=25";
 
 /** Startup screen: the chat brain, ears, speech engine and video animation load once, here, so everything is ready when a person is picked. */
 const STARTUP_ROWS = [
   ["brain", "Brain", "Chat", "Gemma 3 12B"],
   ["speech", "Ears", "Speech to Text", "Whisper large-v3 turbo"],
-  ["voice", "Voice", "Speech Engine", "Chatterbox"],
+  ["voice", "Voice", "Speech Engine", "Qwen3-TTS"],
   ["video", "Video", "Animation Engine", "SoulX FlashHead"],
 ];
 const STARTUP_WORDS = { wait: "Starting…", download: "Downloading…", setup: "Setting up…", ok: "Ready", failed: "Could not install" };
@@ -757,7 +472,7 @@ async function waitForStartup() {
   root.innerHTML = `
     <div class="startup-card">
       <p class="startup-title">Starting AI Avatar Studio</p>
-      <p class="startup-blurb">The chat brain is a large, complex AI language model, so the very first start can take a few minutes while it downloads. After that it starts in under a minute.</p>
+      <p class="startup-blurb">AI Avatar Studio runs several large AI models on your own computer: one to listen, one to think, one to speak and one to animate the face. The first start can take a few minutes while any missing models download. Once they are on your machine, starting is much quicker, but loading them into memory still takes a little while.</p>
       ${STARTUP_ROWS.map(
         ([k, label, what, real]) => (real = r?.names?.[k] || real) && `
         <div class="startup-row" data-part="${k}">

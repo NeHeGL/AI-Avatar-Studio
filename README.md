@@ -49,7 +49,7 @@ Put a chat-tuned `.gguf` file in `brain/models/` and name it `custom-<anything>.
 |---|---|
 | Server and pages | Python, FastAPI, plain HTML/CSS/JavaScript (no framework) |
 | Chat | llama.cpp's server running a Gemma model |
-| Voice | Chatterbox voice cloning |
+| Voice | Qwen3-TTS 1.7B voice cloning |
 | Hearing | Whisper (GPU) or faster-whisper (CPU) |
 | Face video | SoulX-FlashHead-Lite, a lip-sync video model |
 | Photo checks | MediaPipe face landmarks and OpenCV, in the browser and on the server |
@@ -60,7 +60,7 @@ Put a chat-tuned `.gguf` file in `brain/models/` and name it `custom-<anything>.
 | `static/` | The web pages |
 | `brain/` | The chat model and its server (downloaded by the installer) |
 | `ml/` | Voice and video code and the Python environment |
-| `data/profiles/<name>/` | One folder per person: `knowledge/`, `media/`, `voice/` (git-ignored) |
+| `data/profiles/<name>/` | One folder per person: `photo/`, `voice/`, `knowledge/` (and `cache/`, made by the app and safe to delete) (git-ignored) |
 
 ## Limits
 

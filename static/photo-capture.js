@@ -15,7 +15,6 @@ const GOOD_FRAMES = 3; // checks must hold this many frames in a row before a pi
 const GIVE_UP_HINT_MS = 30000;
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** An uploaded file -> a JPEG data URL, no larger than 3200 px on the long side (keeps the upload reasonable). */
 async function fileToDataUrl(file) {
@@ -28,7 +27,7 @@ async function fileToDataUrl(file) {
   return c.toDataURL("image/jpeg", 0.93);
 }
 
-export async function runPhotoStep(root, canonicalName, api) {
+export async function runPhotoStep(root, canonicalName, api, opts = {}) {
   const hb = document.getElementById("logout-btn");
   if (hb) hb.style.display = "none"; // this step has its own Cancel
   document.body.classList.add("wide-stage"); // the same frame as the chat screen: title, corner text and card in the same places
@@ -88,9 +87,9 @@ export async function runPhotoStep(root, canonicalName, api) {
         <button type="button" class="photo-option" id="ph-up"${photos.length >= MAX_PHOTOS ? " disabled" : ""}><strong>Upload a photo</strong><span>Choose a picture of your face, or drop one here. It is centred, zoomed and cropped for you.</span></button>
       </div>
       <input type="file" id="ph-file" accept="image/*" hidden />
-      <div class="step-actions step-actions--row"><button type="button" class="btn-ghost" id="ph-cancel">${photos.length ? "Done" : "Cancel"}</button></div>`);
+      <div class="step-actions step-actions--row"><button type="button" class="btn-ghost" id="ph-cancel">${photos.length ? "Done" : opts.skippable ? "Skip for now" : "Cancel"}</button></div>`);
     const file = wrap.querySelector("#ph-file");
-    wrap.querySelector("#ph-cancel").onclick = () => leave(photos.length ? { profile } : null);
+    wrap.querySelector("#ph-cancel").onclick = () => leave(photos.length ? { profile } : opts.skippable ? { skipped: true } : null);
     const full = photos.length >= MAX_PHOTOS;
     wrap.querySelector("#ph-cam").onclick = full ? null : webcam;
     wrap.querySelector("#ph-up").onclick = full ? null : () => file.click();

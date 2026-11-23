@@ -40,7 +40,6 @@ from PIL import Image
 
 from flash_head.inference import get_audio_embedding, get_base_data, get_infer_params, get_pipeline, run_pipeline
 from flash_head.utils.cpu_face_handler import CPUFaceHandler
-from flash_head.src.pipeline.flash_head_pipeline import FlashHeadPipeline  # noqa: F401  (import check)
 
 CKPT = str(FH / "models" / "SoulX-FlashHead-1_3B")
 W2V = str(FH / "models" / "wav2vec2-base-960h")
@@ -81,7 +80,7 @@ def prepare(source: Path) -> dict:
         except Exception:
             prepared = False
         boxes, _ = ([[0.0, 0.0, 1.0, 1.0]], None) if prepared else FACE(rgb)
-        try:  # a drawing or cartoon the detector cannot read: the person can say where the face is (cinematic/options.json -> "face_box")
+        try:  # a drawing or cartoon the detector cannot read: the person can say where the face is (face/options.json -> "face_box")
             manual = json.loads((d / "options.json").read_text(encoding="utf-8")).get("face_box")
         except Exception:
             manual = None
@@ -208,6 +207,7 @@ def build_bank(source: Path, count: int = BANK_COUNT, seconds: float = BANK_SECO
         rest = np.array(rest_img).astype(np.float32)
         TMP.mkdir(parents=True, exist_ok=True)
         clips = []
+        built = time.time()  # written into the manifest: the page adds it to every clip address, so a browser never replays an older set
         for i in range(count):
             wav = TMP / f"fh_idle_{i}.wav"
             rng = np.random.default_rng(1000 + i)
@@ -228,7 +228,7 @@ def build_bank(source: Path, count: int = BANK_COUNT, seconds: float = BANK_SECO
             proc.wait()
             clips.append({"id": name, "kind": "breathe", "file": f"{name}.mp4", "dur": round(len(frames) / 25, 2), "webm": None, "think": False})
             (d / "manifest.json").write_text(
-                json.dumps({"rest": "rest.jpg", "space": "crop", "width": 512, "height": 512, "fps": 25, "clips": clips}, indent=1), encoding="utf-8")
+                json.dumps({"rest": "rest.jpg", "space": "crop", "width": 512, "height": 512, "fps": 25, "built": built, "clips": clips}, indent=1), encoding="utf-8")
             _bank["done"] = i + 1
             print(f"idle bank: {name} ({i + 1}/{count})", flush=True)
     finally:
@@ -281,8 +281,8 @@ def prepare_person(source: str):
 
 
 @app.post("/render")
-async def render(request: Request, source: str, out: str, emotion: str = "", intensity: float = 0.55, calm_eyes: int = 0):
-    data = await request.body()  # emotion / intensity / calm_eyes are accepted (the app sends them) and not used by FlashHead
+async def render(request: Request, source: str, out: str):
+    data = await request.body()  # the speech, as WAV
     import asyncio
 
     def work():
@@ -311,7 +311,7 @@ if __name__ == "__main__":
         import soundfile as sf
 
         sf.write(warm, np.zeros(16000, dtype=np.float32), 16000)
-        _frames_for(str(warm), next(ROOT.glob("data/profiles/*/media/cinematic/talk_crop.png"), None) or Path(FH / "examples" / "girl.png"))
+        _frames_for(str(warm), next(ROOT.glob("data/profiles/*/cache/face/talk_crop.png"), None) or Path(FH / "examples" / "girl.png"))
         if LEAN:
             torch.cuda.empty_cache()  # small cards only: hand back scratch memory the warm-up left behind
         print("warm-up done", flush=True)

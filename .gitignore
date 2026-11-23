@@ -5,7 +5,6 @@ __pycache__/
 graphify-out/cache/
 
 ml/realtime/models/
-labs/
 ml/ComfyUI/
 ml/out/*.log
 ml/realtime/flashhead/

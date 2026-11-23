@@ -10,7 +10,7 @@ set AVATAR_LLM_MODE=relaxed
 :: -- Python environment missing? Set it up first. (The chat brain, video renderer and models are then downloaded by the app itself, with progress on its start screen.)
 set "NEED="
 if not exist "ml\.venv\Scripts\python.exe" set NEED=1
-if not defined NEED "ml\.venv\Scripts\python.exe" -c "import importlib.util as u,sys;sys.exit(0 if all(u.find_spec(m) for m in ('fastapi','torch','chatterbox','transformers')) else 1)" >nul 2>&1
+if not defined NEED "ml\.venv\Scripts\python.exe" -c "import importlib.util as u,sys;sys.exit(0 if all(u.find_spec(m) for m in ('fastapi','torch','qwen_tts','transformers')) else 1)" >nul 2>&1
 if not defined NEED if errorlevel 1 set NEED=1
 if defined NEED (
     echo  [INFO] AI Avatar Studio is not fully installed yet. Running the installer...

@@ -7,10 +7,11 @@ from pathlib import Path
 from app.models import UserProfile
 
 DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
-# One folder per person: data/profiles/<name>/{knowledge,media,voice}
+# One folder per person: data/profiles/<name>/{photo,voice,knowledge}, the same three things the app shows, plus cache/
+#   photo/      the person's face photos
+#   voice/      voice recordings, the reference clip and per-person voice settings
 #   knowledge/  what the avatar knows about the person: profile.json (saved) and draft.json (being edited)
-#   media/  scan photos, cinematic source/clips, talking-reply videos
-#   voice/  voice recordings, the reference clip and per-person voice settings
+#   cache/      made by the app from the above (animation clips, talking-reply videos); safe to delete, it is rebuilt
 PROFILES_DIR = DATA_ROOT / "profiles"
 # Old flat layout (data/users, data/drafts, data/media): only read by migrate_legacy_layout()
 USERS_DIR = DATA_ROOT / "users"
@@ -32,8 +33,12 @@ def profile_dir(name: str) -> Path:
     return PROFILES_DIR / folder_name(name)
 
 
-def media_dir(name: str) -> Path:
-    return profile_dir(name) / "media"
+def photo_dir(name: str) -> Path:
+    return profile_dir(name) / "photo"
+
+
+def cache_dir(name: str) -> Path:
+    return profile_dir(name) / "cache"
 
 
 def voice_dir(name: str) -> Path:
@@ -217,7 +222,7 @@ def seed_demo_user() -> None:
     key = normalize_name_key("Jeff Molofee")
     if profile_path(key).exists() or profile_dir(key).exists():
         return  # never invent a demo profile over a folder that already holds a real person's photos, voice and notes
-    scan_dir = media_dir("Jeff Molofee") / "scan"
+    scan_dir = photo_dir("Jeff Molofee")
     scan_dir.mkdir(parents=True, exist_ok=True)
     voice_dir("Jeff Molofee").mkdir(parents=True, exist_ok=True)
 
@@ -282,27 +287,8 @@ def seed_demo_user() -> None:
     save_profile(profile)
 
 
-def ensure_media_placeholders() -> None:
-    scan_dir = media_dir("Jeff Molofee") / "scan"
-    scan_dir.mkdir(parents=True, exist_ok=True)
-    svgs = {
-        "front.svg": "#4a90d9",
-        "left.svg": "#50c878",
-        "right.svg": "#e07a4f",
-    }
-    for name, color in svgs.items():
-        path = scan_dir / name
-        if not path.exists():
-            path.write_text(
-                f'<svg xmlns="http://www.w3.org/2000/svg" width="320" height="400">'
-                f'<rect width="100%" height="100%" fill="{color}"/>'
-                f'<text x="50%" y="50%" text-anchor="middle" fill="white" '
-                f'font-family="sans-serif" font-size="20">{name}</text></svg>',
-                encoding="utf-8",
-            )
-
 def migrate_legacy_layout() -> None:
-    """Move the old flat folders (users/, drafts/, media/) into data/profiles/<name>/{knowledge,media,voice}.
+    """Move the old flat folders (users/, drafts/, media/) into data/profiles/<name>/{photo,voice,knowledge,cache}.
 
     Moves only, never deletes content. File paths stored inside the profile JSON are repointed to the new place."""
     import shutil
@@ -343,7 +329,7 @@ def migrate_legacy_layout() -> None:
             if m.is_dir():
                 key = m.name.replace("_", " ")
                 for sub in sorted(m.iterdir()):
-                    mv(sub, voice_dir(key) if sub.name == "voice" else media_dir(key) / sub.name)
+                    mv(sub, voice_dir(key) if sub.name == "voice" else photo_dir(key) if sub.name == "scan" else cache_dir(key) / sub.name)
 
     def repoint(value, key: str, hits: list[bool]):
         if isinstance(value, dict):
@@ -356,7 +342,7 @@ def migrate_legacy_layout() -> None:
                 i = len(parts) - 1 - parts[::-1].index("media")
                 rest = parts[i + 2:]  # what follows media/<person>/
                 if rest:
-                    new = voice_dir(key).joinpath(*rest[1:]) if rest[0] == "voice" else media_dir(key).joinpath(*rest)
+                    new = voice_dir(key).joinpath(*rest[1:]) if rest[0] == "voice" else photo_dir(key).joinpath(*rest[1:]) if rest[0] == "scan" else cache_dir(key).joinpath(*rest)
                     if new.exists():
                         hits.append(True)
                         return str(new)
@@ -372,3 +358,44 @@ def migrate_legacy_layout() -> None:
             raw = repoint(raw, jf.parent.parent.name, hits)
             if hits:
                 jf.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+
+
+    _migrate_media_folder()
+
+
+def _migrate_media_folder() -> None:
+    """The previous layout kept everything in media/ (scan photos, animation clips, reply videos, and whatever else landed there).
+    The photos move to photo/ and the rest to cache/; the paths stored in the knowledge files are repointed. Moves only."""
+    import shutil
+
+    if not PROFILES_DIR.exists():
+        return
+    for d in sorted(PROFILES_DIR.iterdir()):
+        old_face = d / "cache" / "cinematic"  # renamed: the folder is the person's face (photo, waiting clips), nothing cinematic
+        if old_face.is_dir() and not (d / "cache" / "face").exists():
+            old_face.rename(d / "cache" / "face")
+        media = d / "media"
+        if not media.is_dir():
+            continue
+        for sub in sorted(media.iterdir()):
+            dst = d / "photo" if sub.name == "scan" else d / "cache" / sub.name
+            if not dst.exists():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(sub), str(dst))
+            elif sub.is_dir() and sub.name == "scan":  # a photo folder already exists: bring over what is missing
+                for f in sub.iterdir():
+                    if not (dst / f.name).exists():
+                        shutil.move(str(f), str(dst / f.name))
+        try:
+            media.rmdir()  # only when it is empty
+        except OSError:
+            pass
+        for jf in d.glob("knowledge/*.json*"):
+            try:
+                text = jf.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            new = re.sub(r'(profiles(/|\\\\)[^/\\"]+)\2media\2scan\2', r"\1\2photo\2", text)
+            new = re.sub(r'(profiles(/|\\\\)[^/\\"]+)\2media\2', r"\1\2cache\2", new)
+            if new != text:
+                jf.write_text(new, encoding="utf-8")

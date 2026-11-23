@@ -11,7 +11,7 @@ import webbrowser
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -117,25 +117,8 @@ class ConfirmBody(BaseModel):
     unique_full_name: str | None = None
 
 
-class UpdateBody(BaseModel):
-    canonical_name: str
-    sections: list[str]
-    merge_existing: bool = True
-
-
 class SkipBody(BaseModel):
     canonical_name: str
-
-
-class CaptureBody(BaseModel):
-    canonical_name: str
-    section: str
-
-
-class VoiceBody(BaseModel):
-    canonical_name: str
-    audio_base64: str
-    label: str = "Voice sample"
 
 
 class OtherBody(BaseModel):
@@ -199,13 +182,6 @@ def api_confirm(body: ConfirmBody) -> dict:
     )
 
 
-@app.post("/api/walkthrough/apply-updates")
-def api_apply_updates(body: UpdateBody) -> dict:
-    return walkthrough.apply_updates(
-        body.canonical_name, body.sections, body.merge_existing
-    )
-
-
 @app.post("/api/walkthrough/skip-updates")
 def api_skip_updates(body: SkipBody) -> dict:
     return walkthrough.skip_updates(body.canonical_name)
@@ -219,11 +195,6 @@ def api_save_profile(body: SkipBody) -> dict:
 @app.post("/api/walkthrough/delete-profile")
 def api_delete_profile(body: SkipBody) -> dict:
     return walkthrough.delete_profile(body.canonical_name)
-
-
-@app.post("/api/walkthrough/capture-stub")
-def api_capture_stub(body: CaptureBody) -> dict:
-    return walkthrough.run_capture_stub(body.canonical_name, body.section)
 
 
 class PhotoCheckBody(BaseModel):
@@ -264,11 +235,6 @@ def api_photo_select(body: PhotoNameBody) -> dict:
 @app.post("/api/photo/delete")
 def api_photo_delete(body: PhotoNameBody) -> dict:
     return capture.delete_photo(body.canonical_name, body.name)
-
-
-@app.post("/api/capture/voice")
-def api_voice(body: VoiceBody) -> dict:
-    return capture.ingest_voice(body.canonical_name, body.audio_base64, body.label)
 
 
 class VoiceCheckBody(BaseModel):
@@ -338,7 +304,6 @@ class ChatTurnBody(BaseModel):
     canonical_name: str
     audio_base64: str | None = None
     text: str | None = None
-    say: str | None = None
     token: str | None = None
     nudge: int | None = None  # 1..4: the model speaks up because the room went quiet
 
@@ -353,12 +318,6 @@ def api_photoreal_prepare(body: PrepareBody) -> dict:
     from app import photoreal
 
     return photoreal.status(body.canonical_name)
-
-
-@app.get("/api/chat/brain")
-def api_chat_brain() -> dict:
-    """Which chat model and tone the running server loaded (no GPU warmup)."""
-    return {"llm_model": chat.LLM_MODEL, "llm_name": chat.brain_name(), "llm_mode": chat.LLM_MODE}
 
 
 @app.post("/api/chat/warmup")
@@ -403,6 +362,16 @@ def api_chat_start(body: ChatStartBody) -> dict:
     return chat.start(body.canonical_name)
 
 
+class ChatCancelBody(BaseModel):
+    token: str | None = None
+
+
+@app.post("/api/chat/cancel")
+def api_chat_cancel(body: ChatCancelBody) -> dict:
+    """The page tells us you spoke over the reply: stop making the rest of it at once."""
+    return {"cancelled": chat.cancel_current(body.token)}
+
+
 class ChatPartialBody(BaseModel):
     audio_base64: str
 
@@ -417,12 +386,34 @@ def api_chat_partial(body: ChatPartialBody) -> dict:
 
 
 @app.post("/api/chat/turn")
-def api_chat_turn(body: ChatTurnBody) -> StreamingResponse:
-    """NDJSON stream: heard -> say (one per sentence, with WAV audio) -> done."""
-    return StreamingResponse(
-        chat.turn_stream(body.canonical_name, body.audio_base64, body.text, body.say, body.token, body.nudge),
-        media_type="application/x-ndjson",
-    )
+async def api_chat_turn(body: ChatTurnBody, request: Request) -> StreamingResponse:
+    """NDJSON stream: heard -> say (one per sentence, with WAV audio) -> done.
+    The connection is watched all the time: when the page hangs up (you spoke over the reply) the reply is cut off at once, so no more
+    voice or video is made for it and the next question does not have to wait behind it."""
+    import asyncio
+
+    from starlette.concurrency import iterate_in_threadpool
+
+    cancel = threading.Event()
+    gen = chat.turn_stream(body.canonical_name, body.audio_base64, body.text, body.token, body.nudge, cancel)
+
+    async def stream():
+        async def watch() -> None:
+            while True:
+                if await request.is_disconnected():
+                    cancel.set()
+                    return
+                await asyncio.sleep(0.1)
+
+        watcher = asyncio.create_task(watch())
+        try:
+            async for chunk in iterate_in_threadpool(gen):
+                yield chunk
+        finally:
+            watcher.cancel()
+            cancel.set()
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
 
 
 def run(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:

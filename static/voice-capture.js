@@ -16,14 +16,14 @@ export async function runVoiceCapture(root, canonicalName, api) {
   let recordedBlob = null;
 
   const wrap = document.createElement("section");
-  wrap.className = "card";
+  wrap.className = "card voice-flow";
   wrap.innerHTML = `
     <h2>Voice Scan</h2>
     <p>Press Record and read this aloud in one go, at your normal pace and volume (about 40 seconds):</p>
     <blockquote class="voice-script">${VOICE_SCRIPT}</blockquote>
     <div class="voice-meter" id="voice-meter" aria-hidden="true"></div>
     <p id="voice-status" class="voice-status">Microphone not started yet.</p>
-    <audio id="voice-playback" controls class="hidden"></audio>
+    <audio id="voice-playback" class="hidden"></audio>
     <div class="step-actions step-actions--row">
       <button type="button" class="btn-ghost" id="voice-cancel">Cancel</button>
       <button type="button" class="btn-primary" id="voice-record">Record</button>
@@ -113,9 +113,6 @@ export async function runVoiceCapture(root, canonicalName, api) {
             clearInterval(timer);
             const secs = (performance.now() - t0) / 1000;
             recordedBlob = new Blob(chunks, { type: "audio/webm" });
-            playback.src = URL.createObjectURL(recordedBlob);
-            playback.classList.remove("hidden");
-            btnSave.classList.remove("hidden");
             if (secs < MIN_SECONDS) {
               btnSave.disabled = true;
               status.textContent = `That was only ${Math.round(secs)} seconds. Please read the whole passage, then try again.`;
@@ -125,6 +122,8 @@ export async function runVoiceCapture(root, canonicalName, api) {
             }
             btnRecord.textContent = "Record again";
             recording = false;
+            // Go straight to the check screen (it has the playback and the Save), so there is only one Save.
+            if (secs >= MIN_SECONDS) btnSave.onclick();
           };
           recorder.start();
           recording = true;
@@ -174,7 +173,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 export function reviewVoice(root, canonicalName, api, dataUrl) {
   return new Promise(async (resolve) => {
     const wrap = document.createElement("section");
-    wrap.className = "card voice-card";
+    wrap.className = "card voice-card voice-flow";
     wrap.innerHTML = `<h2>Voice Scan</h2><p class="voice-note">Listening to the recording…</p>`;
     root.innerHTML = "";
     root.appendChild(wrap);

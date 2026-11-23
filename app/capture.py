@@ -7,12 +7,8 @@ from uuid import uuid4
 
 from app.models import ScanAsset, VoicePhase
 from app.profile_logic import reconcile_profile
-from app.storage import media_dir, voice_dir, get_working_profile, normalize_name_key, save_draft
+from app.storage import photo_dir, voice_dir, get_working_profile, save_draft
 from app.walkthrough import profile_summary
-
-
-def _user_media_dir(canonical_name: str) -> str:
-    return normalize_name_key(canonical_name).replace(" ", "_")
 
 
 def decode_data_url(data_url: str) -> tuple[bytes, str]:
@@ -50,19 +46,6 @@ def sniff_audio_ext(raw: bytes, fallback: str) -> str:
     if raw[4:8] == b"ftyp":
         return "m4a"
     return fallback
-
-
-def _angle_index_from_asset(asset: ScanAsset) -> int | None:
-    name = Path(asset.path).name
-    if not name.startswith("angle_"):
-        return None
-    parts = name.split("_")
-    if len(parts) < 2:
-        return None
-    try:
-        return int(parts[1])
-    except ValueError:
-        return None
 
 
 MAX_CLIPS = 5  # recordings per profile, shown as tiles like the photos
@@ -109,14 +92,14 @@ def photos(canonical_name: str) -> dict:
     """The person's saved face photos, and which one the avatar is made from."""
     import json
 
-    from app.photoreal import cinematic_dir
+    from app.photoreal import face_dir
     from app.profile_logic import face_assets
     from app.walkthrough import media_url
 
-    profile = get_working_profile(canonical_name)
+    profile = reconcile_profile(get_working_profile(canonical_name))  # the files on disk are the truth: the tiles and the counts must agree
     pinned = None
     try:
-        pinned = json.loads((cinematic_dir(canonical_name) / "options.json").read_text(encoding="utf-8")).get("source_photo")
+        pinned = json.loads((face_dir(canonical_name) / "options.json").read_text(encoding="utf-8")).get("source_photo")
     except Exception:
         pass
     rows = [{"id": a.id, "name": Path(a.path).name, "url": media_url(a.path), "score": round(a.quality_score * 100), "active": Path(a.path).name == pinned}
@@ -129,10 +112,10 @@ def photos(canonical_name: str) -> dict:
 def _pin(canonical_name: str, filename: str) -> None:
     import json
 
-    from app.photoreal import cinematic_dir, invalidate
+    from app.photoreal import face_dir, invalidate
 
     invalidate(canonical_name)  # everything made from the old picture goes (and its pin)
-    o = cinematic_dir(canonical_name) / "options.json"
+    o = face_dir(canonical_name) / "options.json"
     try:
         opts = json.loads(o.read_text(encoding="utf-8"))
     except Exception:
@@ -156,7 +139,7 @@ def save_photo(canonical_name: str, image: str) -> dict:
 
         if len(face_assets(profile)) >= MAX_PHOTOS:
             return {"status": "error", "message": f"{MAX_PHOTOS} photos is the most that can be kept. Delete one to add another."}
-        d = media_dir(canonical_name) / "scan"
+        d = photo_dir(canonical_name)
         d.mkdir(parents=True, exist_ok=True)
         import cv2
 
@@ -174,7 +157,7 @@ def save_photo(canonical_name: str, image: str) -> dict:
 
 
 def select_photo(canonical_name: str, name: str) -> dict:
-    d = media_dir(canonical_name) / "scan"
+    d = photo_dir(canonical_name)
     if not (d / Path(name).name).exists():
         return {"status": "error", "message": "That photo is gone."}
     _pin(canonical_name, Path(name).name)
@@ -186,7 +169,7 @@ def delete_photo(canonical_name: str, name: str) -> dict:
     keep = [a for a in profile.scan_assets if Path(a.path).name != Path(name).name]
     if len(keep) == len(profile.scan_assets):
         return {"status": "error", "message": "That photo is not in this profile."}
-    (media_dir(canonical_name) / "scan" / Path(name).name).unlink(missing_ok=True)
+    (photo_dir(canonical_name) / Path(name).name).unlink(missing_ok=True)
     profile.scan_assets = keep
     profile = reconcile_profile(profile)
     profile.touch()
@@ -200,32 +183,6 @@ def delete_photo(canonical_name: str, name: str) -> dict:
 
         invalidate(canonical_name)  # no photo left: everything made from it goes too
     return {"status": "ok", "profile": profile_summary(profile), **photos(canonical_name)}
-
-
-def ingest_voice(canonical_name: str, audio_base64: str, label: str) -> dict:
-    profile = get_working_profile(canonical_name)
-    vdir = voice_dir(canonical_name)
-    vdir.mkdir(parents=True, exist_ok=True)
-
-    raw, mime = decode_data_url(audio_base64)
-    ext = sniff_audio_ext(raw, extension_for_mime(mime))
-    fname = f"{uuid4().hex[:8]}.{ext}"
-    path = vdir / fname
-    path.write_bytes(raw)
-
-    profile.voice_phases.append(
-        VoicePhase(
-            id=f"voice-{uuid4().hex[:8]}",
-            label=label or "Voice sample",
-            path=str(path),
-            waveform_peaks=[0.2, 0.5, 0.7, 0.9, 0.6, 0.4, 0.8, 0.5, 0.3, 0.6],
-            duration_sec=3.0,
-            quality_score=0.85,
-        )
-    )
-    profile = reconcile_profile(profile)
-    save_draft(profile)
-    return {"status": "ok", "profile": profile_summary(profile)}
 
 
 def ingest_other(canonical_name: str, display_name: str, notes: str, force_clear: bool = False) -> dict:

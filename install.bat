@@ -48,7 +48,7 @@ if errorlevel 1 (
 echo  [3/4] Installing Python packages...
 "%PY%" -m pip install -r requirements.txt
 if errorlevel 1 ( echo  [ERROR] Package install failed. See above. & pause & exit /b 1 )
-"%PY%" -m pip install --no-deps chatterbox-tts==0.1.7
+"%PY%" -m pip install --no-deps qwen-tts==0.1.1
 if errorlevel 1 ( echo  [ERROR] Voice package install failed. See above. & pause & exit /b 1 )
 "%PY%" -m pip install --no-deps faster-whisper
 if errorlevel 1 ( echo  [ERROR] Speech package install failed. See above. & pause & exit /b 1 )

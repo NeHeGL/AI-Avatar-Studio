@@ -1,5 +1,5 @@
 # AI Avatar Studio app environment (ml/.venv). install.bat installs PyTorch first (CUDA build), then this file,
-# then chatterbox-tts with --no-deps (it pins an old torch that this app does not use).
+# then qwen-tts with --no-deps (its own pins would fight the ones below).
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 pydantic>=2.9.0
@@ -11,9 +11,9 @@ opencv-python-headless
 av
 praat-parselmouth
 librosa==0.11.0
-transformers==5.2.0
+transformers==4.57.3  # the version qwen-tts (the voice) is built for
+huggingface_hub<1.0
 accelerate
-huggingface_hub
 imageio-ffmpeg
 # video renderer (SoulX FlashHead) needs these too. mediapipe 0.10.9 needs protobuf<4, so onnx is held at a release that works with it
 mediapipe==0.10.9
@@ -31,13 +31,11 @@ scikit-image
 absl-py
 triton-windows
 ctranslate2
-# chatterbox-tts dependencies
-s3tokenizer
-diffusers>=0.29.0
-resemble-perth>=1.0.0
-conformer==0.3.2
+# qwen-tts (voice) dependencies, installed without its own pins (gradio is only for its demo; onnxruntime is held below 1.21 so protobuf stays <4)
+einops
+sox
+onnxruntime<1.21
+diffusers==0.35.2  # newer releases need huggingface_hub 1.x, which transformers 4.57 does not allow
 safetensors
-pykakasi==2.3.0
 pyloudnorm
 omegaconf
-spacy-pkuseg

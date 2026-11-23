@@ -8,8 +8,8 @@ function transition(root, html) {
   requestAnimationFrame(() => root.classList.add("step-enter"));
 }
 
-export function setCinematicMode(on) {
-  document.body.classList.toggle("cinematic", on);
+export function setOnboardingView(on) {
+  document.body.classList.toggle("onboarding-view", on);
 }
 
 export function setPhaseLabels(phaseLabel, statusHint, label, hint) {
@@ -47,12 +47,12 @@ export async function runSetupPipeline(ctx, opts = {}) {
   const skipFinish = opts.skipFinishCard === true;
 
   if (needFace) {
-    // The photo is required: if the step is cancelled, it starts again (the header's Change profile button leaves).
+    // The photo can be skipped (the avatar face can be added later from the profile page).
     setPhaseLabels(phaseLabel, statusHint, "", "");
-    const { runPhotoStep } = await import("/static/photo-capture.js?v=15");
+    const { runPhotoStep } = await import("/static/photo-capture.js?v=16");
     let photo = null;
-    while (!photo?.profile) photo = await runPhotoStep(root, state.canonicalName, api);
-    state.profile = photo.profile;
+    while (!photo?.profile && !photo?.skipped) photo = await runPhotoStep(root, state.canonicalName, api, { skippable: true });
+    if (photo.profile) state.profile = photo.profile;
   }
 
   if (needVoice) {
@@ -70,7 +70,7 @@ export async function runSetupPipeline(ctx, opts = {}) {
     );
     await waitClick("ob-voice");
 
-    const { runVoiceCapture } = await import("/static/voice-capture.js?v=9");
+    const { runVoiceCapture } = await import("/static/voice-capture.js?v=11");
     let voiceResult = await runVoiceCapture(root, state.canonicalName, api);
     while (!voiceResult?.profile) {
       transition(
@@ -117,12 +117,12 @@ export async function runSetupPipeline(ctx, opts = {}) {
     await waitClick("ob-save");
   }
 
-  setCinematicMode(false);
+  setOnboardingView(false);
   return true;
 }
 
 export function renderHelloIntro(root, onContinue) {
-  setCinematicMode(true);
+  setOnboardingView(true);
   transition(
     root,
     `

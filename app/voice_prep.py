@@ -1,6 +1,6 @@
 """Build the clip the voice engine listens to.
 
-The voice engine (Chatterbox) copies a voice from one short reference clip: it uses about the first 6 seconds closely and up to 10 in
+The voice engine (Qwen3-TTS) copies a voice from one short reference clip: it uses about the first 6 seconds closely and up to 10 in
 all. So what matters is not how much a person recorded but how good the best few seconds are. This module reads EVERY recording in a
 person's voice folder, cuts out the stretches of real speech, drops the silence, hiss, clipped (too loud) and too-quiet parts, ranks what
 is left, and joins the best into one clean ~12 second reference, best parts first. It is written to voice/_ref.wav.
@@ -26,8 +26,6 @@ def _recordings(vdir: Path) -> list[Path]:
 
 def _segments(x: np.ndarray, sr: int) -> list[dict]:
     """Stretches of speech in one recording, each with a quality score."""
-    import scipy.signal as sps
-
     frame = int(sr * 0.02)
     n = len(x) // frame
     if n < 10:
@@ -102,7 +100,9 @@ def build_reference(vdir: Path, load_audio) -> dict | None:
     fp = _fingerprint(files)
     try:
         old = json.loads(meta.read_text(encoding="utf-8"))
-        if out.exists() and old.get("fingerprint") == fp:
+        # the clip must still be the one that was built: a file of another length (the raw recording written over it) is rebuilt
+        same_clip = out.exists() and abs(sf.info(str(out)).duration - float(old.get("seconds", 0.0))) < 0.3
+        if same_clip and old.get("fingerprint") == fp:
             return {"path": out, "seconds": old.get("seconds", 0.0), "speech_seconds": old.get("speech_seconds", 0.0), "sources": old.get("sources", []), "rebuilt": False, "pinned": False}
     except Exception:
         pass

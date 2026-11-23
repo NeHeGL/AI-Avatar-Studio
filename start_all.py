@@ -148,7 +148,7 @@ def _clear_temp_renders() -> None:
                 shutil.rmtree(f) if f.is_dir() else f.unlink()
             except OSError:
                 pass
-    for f in (ROOT / "data" / "profiles").glob("*/media/talk/reply_*.mp4"):
+    for f in (ROOT / "data" / "profiles").glob("*/cache/talk/reply_*.mp4"):
         f.unlink(missing_ok=True)
 
 

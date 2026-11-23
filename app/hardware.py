@@ -1,7 +1,7 @@
 """Pick the models that fit this PC's graphics card.
 
 Measured GPU memory (Windows, 4k context): chat brain Gemma 3 12B Q4 = 8.4 GB, Gemma 3 4B Q4 = about 3.3 GB; video animation 6.8 GB;
-voice 3.2 GB; ears Whisper large-v3 turbo 2.1 GB, Whisper small about 0.6 GB (on the CPU it takes about 3 s per 8 s of speech). Everything has to share the card with the desktop.
+voice (Qwen3-TTS 1.7B) about 4.6 GB at its peak; ears Whisper large-v3 turbo 2.1 GB, Whisper small about 0.6 GB (on the CPU it takes about 3 s per 8 s of speech). Everything has to share the card with the desktop.
 
 AVATAR_VRAM_GB=16 pretends the card has that much (for testing a smaller tier).
 """

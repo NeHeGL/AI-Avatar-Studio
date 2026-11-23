@@ -117,10 +117,8 @@ def analyze(img: np.ndarray, make_crop: bool = True) -> dict:
     else:
         img2 = img
     x0, x1 = float(P[:, 0].min()), float(P[:, 0].max())
-    y0, y1 = float(P[:, 1].min()), float(P[:, 1].max())
     top, chin = float(P[10, 1]), float(P[152, 1])
     face_h = max(chin - top, 1.0)  # forehead to chin
-    face_w = x1 - x0
     face_cx = (float(P[234, 0]) + float(P[454, 0])) / 2
     face_cy = (top + chin) / 2
 

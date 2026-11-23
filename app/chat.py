@@ -24,7 +24,6 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 ML = ROOT / "ml"
 from app import topics as _topics  # noqa: E402
-OUT = ML / "out"
 if str(ML) not in sys.path:
     sys.path.insert(0, str(ML))
 LLM_MODEL = os.environ.get("AVATAR_LLM", "brain")
@@ -32,7 +31,6 @@ LLM_URL = os.environ.get("AVATAR_LLM_URL", "http://127.0.0.1:8772")
 # relaxed = casual private chat, no scolding about language; safe = tighter assistant tone
 LLM_MODE = os.environ.get("AVATAR_LLM_MODE", "relaxed").strip().lower()
 LLM_TEMPERATURE = float(os.environ.get("AVATAR_LLM_TEMPERATURE", "0.85" if LLM_MODE == "relaxed" else "0.7"))
-LLM_NUM_CTX = int(os.environ.get("AVATAR_LLM_CTX", "3072"))  # conversation window in tokens: a bigger one costs GPU memory for nothing here
 LLM_NUM_PREDICT = int(os.environ.get("AVATAR_LLM_NUM_PREDICT", "280"))
 SR_IN = 16000
 
@@ -42,12 +40,18 @@ PHANTOMS = {
     "okay", "ok", "oh", "uh", "um", "hmm", "mm", "mhm", "the", "so", "yeah", "i'm sorry", ".", "...",
 }
 
-def _is_phantom(text: str) -> bool:
-    """Whisper invents text from silence/noise: a stock phrase, or the same short sentence repeated over and over."""
+def _is_phantom(text: str, loud: bool = False, seconds: float = 0.0) -> bool:
+    """Whisper invents text from silence/noise: a stock phrase, or the same short sentence repeated over and over.
+    loud=True means the recording has the level of real speech: then a repeated phrase is a PERSON repeating it ("hello world" ten times),
+    not an invention, so only the stock phrases and nonsense are rejected."""
     norm = lambda t: t.lower().strip(" .!?,")  # noqa: E731
     stock = {norm(p) for p in PHANTOMS}
     if len(text) < 2 or norm(text) in stock:
         return True
+    if seconds > 1.0 and len(re.findall(r"[a-z']+", text.lower())) / seconds > 5.5:
+        return True  # nobody speaks that fast: the listening model is looping ("you you you you...")
+    if loud:
+        return False
     parts = [norm(x) for x in re.split(r"[.!?]+", text) if norm(x)]
     if len(parts) >= 3 and len(set(parts)) <= max(1, len(parts) // 4):  # one phrase repeated
         return True
@@ -56,6 +60,7 @@ def _is_phantom(text: str) -> bool:
 
 
 _lock = threading.Lock()  # one GPU job at a time
+_partial_lock = threading.Lock()  # one live-words check at a time (they do not wait for the voice)
 def partial_text(audio_base64: str) -> str:
     """Quick live transcript of what is being said right now (shown while the person is still talking). Never queues behind
     other GPU work: if the GPU is busy it just skips this round. Nothing is stored and nothing leaves the machine."""
@@ -69,21 +74,38 @@ def partial_text(audio_base64: str) -> str:
     x = x.mean(axis=1)
     if len(x) < SR_IN * 0.5 or float(np.sqrt((x ** 2).mean())) < 0.004:
         return ""
-    if not _lock.acquire(timeout=2.0):  # the GPU is busy with something else: wait a moment, then give up this round
-        _log("live words: GPU busy, skipped a round")
+    # Live words never wait for the voice: the voice takes 5 to 16 seconds a sentence, and waiting made them (and so what you see while you
+    # talk) disappear for the whole time it was thinking or speaking. The listening model is small; one live check at a time.
+    if not _partial_lock.acquire(blocking=False):
         return ""
     try:
         t0 = time.time()
         text = ears({"raw": x[-25 * SR_IN:], "sampling_rate": SR_IN}, chunk_length_s=28, generate_kwargs={"language": "en", "task": "transcribe"})["text"].strip()
     finally:
-        _lock.release()
+        _partial_lock.release()
     _log(f"live words ({len(x) / SR_IN:.1f}s of speech, {time.time() - t0:.2f}s): {text!r}")
-    return "" if _is_phantom(text) else text
+    if _is_phantom(text, loud=float(np.sqrt((x ** 2).mean())) >= 0.03 and len(x) >= SR_IN * 1.0, seconds=len(x) / SR_IN):
+        return ""
+    return text
 
 
+# The voice: Qwen3-TTS 1.7B (voice cloning), loaded in this process
+QWEN_REPO = os.environ.get("AVATAR_QWEN_MODEL", "Qwen/Qwen3-TTS-12Hz-1.7B-Base")
+TOKENS_PER_SEC = 12  # the voice model's codec: a take is capped by its length so a runaway can never talk forever
 _state = {"ears": None, "tts": None, "voice_key": None, "loading": False}
 _sessions: dict[str, "Session"] = {}
 _owner = {"token": None}  # only the newest chat window may talk
+_current_turn = {"cancel": None}  # the hang-up flag of the reply being made right now
+
+
+def cancel_current(token: str | None) -> bool:
+    """You spoke over the reply (or carried on before it answered): stop making it, now. Called by the page the moment it happens, because
+    the server cannot rely on noticing the closed connection while it is busy streaming."""
+    ev = _current_turn["cancel"]
+    if token == _owner["token"] and ev is not None:
+        ev.set()
+        return True
+    return False
 _log = lambda *a: print("[chat]", *a, flush=True)  # noqa: E731
 
 
@@ -167,7 +189,7 @@ class _FastEars:
 
 
 def _models():
-    """Download (first run only) and load Whisper + Chatterbox once."""
+    """Download (first run only) and load Whisper + the voice model once."""
     import torch
     from app import hardware
 
@@ -192,17 +214,16 @@ def _models():
             )
         _log(f"whisper ready in {time.time() - t0:.1f}s")
     if _state["tts"] is None:
-        from chatterbox.tts import ChatterboxTTS
+        import torch
+        from qwen_tts import Qwen3TTSModel
 
         t0 = time.time()
-        _fetch("voice", "ResembleAI/chatterbox", ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"])
+        _fetch("voice", QWEN_REPO, ["*.json", "*.txt", "*.safetensors"])
         _prog["voice"]["state"] = "setup"
-        _state["tts"] = ChatterboxTTS.from_pretrained(device="cuda")
-        if hardware.tier()["name"] == "small":  # ONLY a card short of memory (the 16 GB tier): the voice runs leaner. Bigger cards never use half precision.
-            _state["tts"].t3.half()
-            _state["half_voice"] = True
-            torch.cuda.empty_cache()
-        _log(f"chatterbox ready in {time.time() - t0:.1f}s")
+        _state["tts"] = Qwen3TTSModel.from_pretrained(QWEN_REPO, device_map="cuda:0", dtype=torch.bfloat16)
+        _allow_voice_cancel(_state["tts"])
+        _warm_voice(_state["tts"])
+        _log(f"voice model ready in {time.time() - t0:.1f}s")
     return _state["ears"], _state["tts"]
 
 
@@ -297,23 +318,30 @@ def _level_to(x: np.ndarray, sr: int, target_db: float = -18.0, peak: float = 0.
     return y.astype(np.float32)
 
 
-def _half_voice(tts) -> None:
-    """Run the voice's big transformer in half precision (about 1 GB less graphics memory)."""
-    import torch
+def _ref_text(ref_wav: Path) -> str:
+    """What the reference clip says (Qwen needs the words that are spoken in it). Heard once with Whisper, then kept next to the clip."""
+    txt = ref_wav.with_suffix(".txt")
+    if txt.exists() and txt.stat().st_mtime >= ref_wav.stat().st_mtime:
+        return txt.read_text(encoding="utf-8").strip()
+    import scipy.signal as sps
 
-    tts.t3.half()
-    for k, v in list(vars(tts.conds.t3).items()):
-        if torch.is_tensor(v) and v.is_floating_point():
-            setattr(tts.conds.t3, k, v.half())
+    x, sr = _load_any_audio(ref_wav)
+    x = sps.resample_poly(np.asarray(x, dtype=np.float32), SR_IN, sr) if sr != SR_IN else np.asarray(x, dtype=np.float32)
+    text = _state["ears"]({"raw": x, "sampling_rate": SR_IN}, chunk_length_s=28, generate_kwargs={"language": "en", "task": "transcribe"})["text"].strip()
+    txt.write_text(text, encoding="utf-8")
+    return text
 
 
 def _use_voice(key: str, ref_wav: Path) -> None:
-    tts = _state["tts"]
+    """Learn this person's voice from their reference clip (once; kept until another person's voice is used)."""
     if _state["voice_key"] != key:
-        tts.prepare_conditionals(str(ref_wav), exaggeration=0.5)
-        if _state.get("half_voice"):
-            _half_voice(tts)  # the new voice's conditioning must match the model's precision
+        _state["voice_prompt"] = _state["tts"].create_voice_clone_prompt(ref_audio=str(ref_wav), ref_text=_ref_text(ref_wav))
         _state["voice_key"] = key
+        x, sr = _load_any_audio(ref_wav)
+        mp = _median_pitch(np.asarray(x, dtype=np.float32), sr)
+        # the pitch a take of this person may have when nothing else is set: the voice model now and then drifts to a generic voice (a take
+        # at 269 Hz for someone who speaks at 219 Hz was "not her voice at all"), and such a take is made again
+        _state["auto_pitch"] = [mp * 0.78, mp * 1.22] if mp else None
 
 
 def _alternating(history: list[dict]) -> list[dict]:
@@ -372,34 +400,58 @@ SENT_END = re.compile(r"(?<=[.!?])\s+")
 _ABBREV = re.compile(r"\b(?:Dr|Mr|Mrs|Ms|Prof|St|Sr|Jr|vs|etc|No)\.$")
 
 
-CLAUSE_END = re.compile(r"[,;:\u2014\u2013]\s")
+CLAUSE_END = re.compile(r"[,;:—–]\s")
+_CONJ = re.compile(r"\s(?=(?:and|but|because|when|while|which|then|if|where|although|though|before|after|until|unless)\b)", re.I)
+# a chunk must never END on one of these: the sentence is obviously unfinished there ("... one of the" / "... going to")
+_DANGLING = {"a", "an", "the", "to", "of", "in", "on", "at", "for", "with", "from", "by", "my", "your", "his", "her", "our", "their", "its",
+             "i", "we", "you", "he", "she", "they", "it", "is", "are", "was", "were", "be", "been", "am", "do", "did", "does", "have", "has",
+             "had", "not", "no", "very", "just", "really", "so", "that", "this", "these", "those", "some", "any", "than", "as", "into", "about"}
 
 
-def _sentences(tokens, min_chars=60, first_clause_chars=30):
-    """Split a token stream into speakable chunks. The FIRST chunk may end at a natural pause (a comma, a dash)
-    as soon as it is long enough, so speech and video can start sooner; later chunks end at sentence ends.
-    Every chunk is its own video, so chunks are kept long (fewer seams). Lengths ignore the [mood] tags."""
+def _sentences(tokens, first_min=14, first_max=38, later_min=34, later_max=80):
+    """Split a token stream into speakable chunks, sized for a voice that works slower than real time.
+
+    The FIRST chunk is short, so the first sound comes early: it ends at a natural pause (comma, dash, sentence end) once it has `first_min`
+    characters, or, if the sentence runs on, before a joining word ("and", "but", "because"...) once it passes `first_max`. Later chunks
+    are medium (`later_min`..`later_max`): a long chunk leaves a long silence while its voice is made, and every chunk is its own video, so
+    they are not made too short either. Lengths ignore the [mood] tags. Chunks only ever end at a natural pause, so the voice sounds the same."""
     vis = lambda t: len(_TAG.sub("", t).strip())
-    buf = ""
-    first = True
+
+    def cut(buf: str, first: bool):
+        """Index to cut `buf` at (the text before it is spoken now), or None to wait for more words."""
+        lo, hi = (first_min, first_max) if first else (later_min, later_max)
+        end_min = 14 if first else 18  # a sentence end is the most natural place to cut, so it needs less text than a comma does
+        ends = [m.end() for m in SENT_END.finditer(buf) if vis(buf[: m.start()]) >= end_min and not _ABBREV.search(buf[: m.start()].strip())]
+        if ends:
+            return ends[0]
+        for m in CLAUSE_END.finditer(buf):  # a comma / dash: a natural pause, if the text before it is long enough and the sentence is not about to end
+            if vis(buf[: m.end()]) >= lo and not _ABBREV.search(buf[: m.end()].strip()):
+                rest = buf[m.end():]
+                if not SENT_END.search(rest) or vis(rest) > 12:
+                    return m.end()
+        if vis(buf) >= hi:  # no pause yet and the sentence runs on: break before a joining word, else wait
+            for m in reversed(list(_CONJ.finditer(buf))):
+                left = _TAG.sub("", buf[: m.start()]).strip()
+                last = re.sub(r"[^a-z']", "", left.split()[-1].lower()) if left.split() else ""
+                joiner = buf[m.end():].split(None, 1)[0].lower() if buf[m.end():].split() else ""
+                # "or" is never a break (it joins the things in a list: "rocks or fossils"); "and" only after a full clause, never a short phrase
+                if joiner == "and" and len(left.split()) < 8:
+                    continue
+                if vis(left) >= lo and last not in _DANGLING:
+                    return m.start() + 1
+        return None
+
+    buf, first = "", True
     for tok in tokens:
         buf += tok
-        if first:
-            end = SENT_END.search(buf)
-            for m in CLAUSE_END.finditer(buf):
-                if vis(buf[: m.end()]) >= first_clause_chars and not (end and end.start() < m.start()):
-                    piece = buf[: m.end()].strip()
-                    if not _ABBREV.search(piece):
-                        yield piece
-                        buf = buf[m.end():]
-                        first = False
-                    break
-        parts = SENT_END.split(buf)
-        while len(parts) > 1 and vis(parts[0]) >= (24 if first else min_chars) and not _ABBREV.search(parts[0].strip()):
-            first = False  # the first chunk is short so speech starts early; the rest are long, to keep the seams few
-            yield parts[0].strip()
-            buf = " ".join(parts[1:])
-            parts = SENT_END.split(buf)
+        while True:
+            at = cut(buf, first)
+            if at is None:
+                break
+            piece, buf = buf[:at].strip(), buf[at:].lstrip()
+            if piece:
+                yield piece
+            first = False
     if buf.strip():
         yield buf.strip()
 
@@ -434,21 +486,39 @@ def _split_mood(sent: str, last: str = "neutral") -> tuple[str, str]:
     return text, mood
 
 
+def _echo_words(s: str) -> list[str]:
+    """Words for comparing speech with speech: lower case, no punctuation, contractions spelled out ("I'm" = "i am")."""
+    s = s.lower().replace("’", "'")
+    for a, b in (("won't", "will not"), ("can't", "can not"), ("n't", " not"), ("'m", " am"), ("'re", " are"), ("'ve", " have"),
+                 ("'ll", " will"), ("'d", " would"), ("'s", " is")):
+        s = s.replace(a, b)
+    return re.sub(r"[^a-z0-9 ]+", " ", s).split()
+
+
 def _is_echo(sess, heard: str) -> bool:
-    """True if what the microphone 'heard' is mostly the avatar's own recent speech coming back through the speakers."""
+    """True if what the microphone 'heard' is the avatar's own recent speech coming back through the speakers.
+
+    The microphone is ignored while it talks, so this only catches the tail of its voice fading out of the room. Its words are
+    transcribed accurately and we know every sentence it made: a long, nearly exact repeat of them is its echo. (A short reply that
+    repeats its words is a person answering, so it is kept.)"""
     import difflib
 
     now = time.time()
     recent = [t for ts, t in getattr(sess, "recent_said", []) if now - ts < 90]
-    words = lambda s: re.sub(r"[^a-z0-9' ]+", " ", s.lower()).split()  # noqa: E731
-    h = words(heard)
-    if len(h) < 3 or not recent:
+    h = _echo_words(heard)
+    if not recent:
         return False
-    for r in recent:
-        sm = difflib.SequenceMatcher(None, h, words(r), autojunk=False)
-        matched = sum(b.size for b in sm.get_matching_blocks())
-        longest = max((b.size for b in sm.get_matching_blocks()), default=0)
-        if matched / len(h) >= 0.85 and longest >= 3:
+    spans = [_echo_words(r) for r in recent]
+    spans += [sum(spans[i:i + 3], []) for i in range(len(spans))]  # a phrase may run across two sentences
+    if len(h) < 3:
+        return False
+    need = 0.85 * len(h)
+    for r in spans:
+        sm = difflib.SequenceMatcher(None, h, r, autojunk=False)
+        blocks = sm.get_matching_blocks()
+        matched = sum(b.size for b in blocks)
+        longest = max((b.size for b in blocks), default=0)
+        if matched >= need and longest >= 3:
             return True
     return False
 
@@ -567,6 +637,8 @@ def _build_system(display_name: str, notes: str, brief: dict | None = None) -> s
     spoken = (
         f"You are in a spoken conversation: {length} "
         "No lists, no markdown, no emojis, no stage directions, no parenthetical notes. "
+        "Talk the way people talk out loud: short, simple sentences of about 6 to 14 words, one idea each, with a comma wherever you would pause "
+        "for breath. Never write a long sentence with several clauses strung together. "
         "Always reply in English. Always write names with their normal spelling. NEVER write a pronunciation guide, split a name into syllables, or spell a name out: "
         "the voice already says names correctly. "
         "Begin EVERY sentence with one mood tag in square brackets that matches how you feel saying it, chosen from: "
@@ -776,6 +848,7 @@ def start(canonical_name: str) -> dict:
             x, sr = _load_any_audio(ref)
             import soundfile as sf
 
+            ref_wav = ref_wav.with_name("_ref_raw.wav")  # never over _ref.wav: that name is the cleaned clip, whose record says how long it is
             sf.write(str(ref_wav), x, sr)
         _use_voice(key, ref_wav)
     brief: dict = {}
@@ -800,26 +873,13 @@ def start(canonical_name: str) -> dict:
         "llm_model": LLM_MODEL,
         "llm_name": brain_name(),
         "llm_mode": LLM_MODE,
+        "voice_name": "Qwen3-TTS 1.7B",
+        "ears_name": __import__("app.hardware", fromlist=["tier"]).tier()["whisper_name"],
     }
 
 
-VOICE_GUARD_TRIES = int(os.environ.get("AVATAR_VOICE_GUARD_TRIES", "2"))  # 1 = no guard
-VOICE_GUARD_OK = float(os.environ.get("AVATAR_VOICE_GUARD_OK", "0.80"))  # similarity that needs no second try
-
-
-def _voice_similarity(tts, samples: np.ndarray, ref_emb: np.ndarray) -> float:
-    """How close a generated sentence is to the recording's own voice fingerprint (1.0 = identical)."""
-    import scipy.signal as sps
-
-    x16 = sps.resample_poly(samples.astype(np.float32), 16000, tts.sr)
-    e = tts.ve.embeds_from_wavs([x16], sample_rate=16000)[0]
-    e = e / (np.linalg.norm(e) + 1e-9)
-    r = ref_emb / (np.linalg.norm(ref_emb) + 1e-9)
-    return float(np.dot(e, r))
-
-
 def _voice_profile(canonical_name: str) -> dict:
-    """Optional per-person voice settings (data/profiles/<person>/voice/profile.json): {"cfg_weight", "exaggeration", "temperature",
+    """Optional per-person voice settings (data/profiles/<person>/voice/profile.json): {
     "flow": true (no commas after short phrases, so they run together), "max_tries", "pitch_hz": [low, high] (the pitch a take must sit in)}."""
     try:
         from app.storage import voice_dir
@@ -862,62 +922,149 @@ def _median_pitch(x: np.ndarray, sr: int) -> float | None:
         return None
 
 
-def _speak(sess: Session, text: str) -> bytes:
-    tts = _state["tts"]
+# How close a take must be to the person's reference clip, as measured by the voice model's own speaker encoder (1.0 = identical).
+# Measured on real takes: good ones scored 0.93 to 0.99 for every person tried; two takes that sounded like a random other voice scored 0.922 and 0.927.
+VOICE_LIKENESS_MIN = 0.93
+
+
+def _likeness(x: np.ndarray, sr: int) -> float | None:
+    """How much this take sounds like the reference the voice was learned from (None if it cannot be measured, which never blocks a take)."""
+    try:
+        import torch
+
+        if sr != 24000:
+            import librosa
+
+            x = librosa.resample(x.astype(np.float32), orig_sr=sr, target_sr=24000)
+        mine = _state["tts"].model.extract_speaker_embedding(audio=x.astype(np.float32), sr=24000).float().flatten()
+        ref = _state["voice_prompt"][0].ref_spk_embedding.float().flatten().to(mine.device)
+        return float(torch.nn.functional.cosine_similarity(mine, ref, dim=0))
+    except Exception as exc:
+        _log("voice likeness not measured:", exc)
+        return None
+
+
+def _take(spoken: str, max_seconds: float) -> tuple[np.ndarray, int]:
+    """One take of the voice. It stops at max_seconds, so a runaway cannot talk forever."""
+    wavs, sr = _state["tts"].generate_voice_clone(
+        text=spoken, language="English", voice_clone_prompt=_state["voice_prompt"], max_new_tokens=int(max(2.0, max_seconds) * TOKENS_PER_SEC))
+    return np.asarray(wavs[0], dtype=np.float32), int(sr)
+
+
+def _warm_voice(tts) -> None:
+    """Make one throw-away sound while the app loads, so the first real sentence is not slowed by one-time start-up work in the voice
+    model. It uses a plain tone as the voice and is never heard or kept."""
+    try:
+        import tempfile
+
+        import soundfile as sf
+
+        sr = 24000
+        t = np.arange(sr * 2) / sr
+        tone = (0.1 * np.sin(2 * np.pi * 140 * t) * np.hanning(len(t))).astype(np.float32)
+        with tempfile.TemporaryDirectory() as d:
+            ref = Path(d) / "warm.wav"
+            sf.write(str(ref), tone, sr)
+            prompt = tts.create_voice_clone_prompt(ref_audio=str(ref), ref_text="Okay.")
+            tts.generate_voice_clone(text="Okay, I am ready.", language="English", voice_clone_prompt=prompt, max_new_tokens=60)
+    except Exception as exc:  # only a speed-up: never stop the app from starting
+        _log("voice warm-up skipped:", exc)
+
+
+class _Cancelled(Exception):
+    """The reply this voice was being made for was cut off (you spoke over it): stop, nobody is listening to it."""
+
+
+_voice_cancel: dict = {"ev": None}  # the hang-up flag of the reply whose voice is being made right now
+
+
+def _allow_voice_cancel(tts) -> None:
+    """Let the voice's generation loop stop early when the reply it is for has been cut off. The condition is False the rest of the
+    time, so a normal sentence is generated exactly as before."""
+    try:
+        import torch
+        from transformers import StoppingCriteria, StoppingCriteriaList
+
+        class _Abort(StoppingCriteria):
+            def __call__(self, input_ids, scores, **kwargs):
+                ev = _voice_cancel["ev"]
+                return torch.full((input_ids.shape[0],), bool(ev is not None and ev.is_set()), dtype=torch.bool, device=input_ids.device)
+
+        talker = tts.model.talker
+        orig = talker.generate
+
+        def generate(*a, **k):
+            sc = k.get("stopping_criteria") or StoppingCriteriaList()
+            sc.append(_Abort())
+            k["stopping_criteria"] = sc
+            return orig(*a, **k)
+
+        talker.generate = generate
+    except Exception as exc:  # the voice must work even if this cannot be set up
+        _log("voice cancel not available:", exc)
+
+
+def _speak(sess: Session, text: str, cancel: "threading.Event | None" = None) -> bytes:
     prof = getattr(sess, "voice_profile", None) or {}
     spoken = _for_voice(sess, text)
     if prof.get("flow"):
         spoken = _flow(spoken)
-    cfg, exg, temp = prof.get("cfg_weight", 0.5), prof.get("exaggeration", 0.5), prof.get("temperature", 0.8)
-    tries = max(1, VOICE_GUARD_TRIES, int(prof.get("max_tries", 0)))
+    tries = max(2, int(prof.get("max_tries", 0)))
     n_words = max(1, len(spoken.split()))
-    lo_s, hi_s = n_words * 0.12, n_words * 0.9 + 2.0  # a take far outside this is a ramble (dead air) or a cut-off
-    window = prof.get("pitch_hz")
+    lo_s, hi_s = n_words * 0.12, n_words * 0.9 + 2.0  # a take far outside this is a ramble or a cut-off
     with _lock:
+        if cancel is not None and cancel.is_set():
+            raise _Cancelled()  # it waited for its turn while you cut the reply off: do not make it
         _use_voice(sess.key, sess.ref_wav)  # type: ignore[attr-defined]
-        best = None  # (score, samples)
-        ref_emb = None
-        for attempt in range(tries):
-            x = tts.generate(spoken, cfg_weight=cfg, exaggeration=exg, temperature=temp).squeeze().float().cpu().numpy()
-            dur = len(x) / tts.sr
-            ok = lo_s <= dur <= hi_s
-            if ok and window:
-                mp = _median_pitch(x, tts.sr)
-                if mp is not None and not (window[0] <= mp <= window[1]):
-                    ok = False
-                    _log(f"voice take rejected: pitch {mp:.0f} Hz outside {window[0]}-{window[1]} (try {attempt + 1})")
-            elif not ok:
-                _log(f"voice take rejected: {dur:.1f}s for {n_words} words (try {attempt + 1})")
-            sim = 0.5
-            try:
-                if ref_emb is None:
-                    ref_emb = tts.conds.t3.speaker_emb.detach().float().cpu().numpy().reshape(-1)
-                sim = _voice_similarity(tts, x, ref_emb)
-            except Exception as exc:  # the guard must never stop the voice
-                _log("voice guard skipped:", exc)
-            _log(f"voice match {sim:.2f} (try {attempt + 1}) {text[:30]!r}")
-            score = sim + (1.0 if ok else 0.0)  # a take that passes the checks always beats one that does not
-            if best is None or score > best[0]:
-                best = (score, x)
-            if ok and (VOICE_GUARD_TRIES <= 1 or sim >= VOICE_GUARD_OK):
-                break
-    return _wav_bytes(_level_to(best[1], tts.sr), tts.sr)
+        window = prof.get("pitch_hz") or _state.get("auto_pitch")
+        _voice_cancel["ev"] = cancel
+        try:
+            return _speak_takes(spoken, tries, n_words, lo_s, hi_s, window, cancel)
+        finally:
+            _voice_cancel["ev"] = None
 
 
-def _reply_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> str:
-    """Photoreal talking video of this sentence from the local FlashHead render service; "" on any problem (the page then
-    falls back to the animated face). Uses the same wide photo as the pre-rendered clips so the framing never jumps."""
+def _speak_takes(spoken: str, tries: int, n_words: int, lo_s: float, hi_s: float, window, cancel) -> bytes:
+    best = None  # (passed the checks, samples, sample rate)
+    for attempt in range(tries):
+        x, sr = _take(spoken, hi_s)
+        if cancel is not None and cancel.is_set():
+            raise _Cancelled()
+        dur = len(x) / sr
+        ok = lo_s <= dur < hi_s - 0.3  # a take that ran into the cap was cut off
+        if ok and window:
+            mp = _median_pitch(x, sr)
+            if mp is not None and not (window[0] <= mp <= window[1]):
+                ok = False
+                _log(f"voice take rejected: pitch {mp:.0f} Hz outside {window[0]}-{window[1]} (try {attempt + 1})")
+        elif not ok:
+            _log(f"voice take rejected: {dur:.1f}s for {n_words} words (try {attempt + 1})")
+        if ok:
+            sim = _likeness(x, sr)
+            if sim is not None and sim < VOICE_LIKENESS_MIN:
+                ok = False
+                _log(f"voice take rejected: does not sound like the person (likeness {sim:.3f}, needs {VOICE_LIKENESS_MIN}) (try {attempt + 1})")
+        if best is None or (ok and not best[0]):
+            best = (ok, x, sr)
+        if ok:
+            break
+    return _wav_bytes(_level_to(best[1], best[2]), best[2])
+
+
+def _reply_video_url(canonical_name: str, wav_bytes: bytes) -> str:
+    """Talking video of this sentence from the local FlashHead render service; "" on any problem (the page then keeps the still picture
+    while the voice plays). It is made from the same prepared photo as the waiting animations, so the framing never jumps."""
     try:
         import urllib.parse
         import urllib.request
 
-        from app.storage import media_dir
+        from app.storage import cache_dir
         from app.walkthrough import media_url
 
-        user_dir = media_dir(canonical_name)
-        source = user_dir / "cinematic" / "source.jpg"
+        user_dir = cache_dir(canonical_name)
+        source = user_dir / "face" / "source.jpg"
         try:  # a picture the video engine redraws badly (cartoons, drawings): voice only, over the still picture
-            if json.loads((user_dir / "cinematic" / "options.json").read_text(encoding="utf-8")).get("talking_video") is False:
+            if json.loads((user_dir / "face" / "options.json").read_text(encoding="utf-8")).get("talking_video") is False:
                 return ""
         except Exception:
             pass
@@ -929,13 +1076,7 @@ def _reply_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> s
             if time.time() - old.stat().st_mtime > 600:
                 old.unlink(missing_ok=True)
         out = talk_dir / f"reply_{uuid.uuid4().hex[:10]}.mp4"
-        try:
-            glasses = bool(json.loads((user_dir / "cinematic" / "options.json").read_text(encoding="utf-8")).get("glasses"))
-        except Exception:
-            glasses = False
-        url = os.environ.get("AVATAR_VIDEO_URL", "http://127.0.0.1:8771") + "/render?" + urllib.parse.urlencode(
-            {"source": str(source), "out": str(out), **({"emotion": mood} if mood and mood != "neutral" else {}), **({"calm_eyes": 1} if glasses else {})}
-        )
+        url = os.environ.get("AVATAR_VIDEO_URL", "http://127.0.0.1:8771") + "/render?" + urllib.parse.urlencode({"source": str(source), "out": str(out)})
         t0 = time.time()
         req = urllib.request.Request(url, data=wav_bytes, method="POST", headers={"Content-Type": "audio/wav"})
         with urllib.request.urlopen(req, timeout=180) as r:
@@ -949,11 +1090,11 @@ def _reply_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> s
         return ""
 
 
-def _talk_video_url(canonical_name: str, wav_bytes: bytes, mood: str = "") -> str:
+def _talk_video_url(canonical_name: str, wav_bytes: bytes) -> str:
     """Video for this sentence from the local FlashHead render service; "" if turned off (AVATAR_REPLY_VIDEO=off) or on any problem."""
     if os.environ.get("AVATAR_REPLY_VIDEO", "ditto").strip().lower() in ("off", "0", "no", "none"):
         return ""
-    return _reply_video_url(canonical_name, wav_bytes, mood)
+    return _reply_video_url(canonical_name, wav_bytes)
 
 
 def _ev(**kw) -> bytes:
@@ -1066,7 +1207,8 @@ def _nudge_prompt(n: int, canonical_name: str = "", display: str = "") -> str:
     return line + " " + _topics.pick() if int(n) <= 4 else line
 
 
-def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, say: str | None, token: str | None = None, nudge: int | None = None):
+def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, token: str | None = None, nudge: int | None = None,
+                cancel: "threading.Event | None" = None):
     if token != _owner["token"]:
         yield _ev(type="superseded")
         return
@@ -1074,17 +1216,10 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
     if sess is None:
         yield _ev(type="error", message="Chat not started for this profile.")
         return
+    said: list[str] = []  # what has been handed to the page so far (tagged)
+    cancel = cancel or threading.Event()  # set when the page hangs up (you spoke over the reply): no more voice or video is made for it
+    _current_turn["cancel"] = cancel
     try:
-        if say:
-            wav = _speak(sess, say)
-            yield _ev(
-                type="say",
-                text=say,
-                audio=base64.b64encode(wav).decode(),
-                video_url=_talk_video_url(canonical_name, wav),
-            )
-            yield _ev(type="done")
-            return
         if nudge:
             text, audio_b64 = None, None
         if audio_b64:
@@ -1104,7 +1239,7 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
                 text = ears({"raw": x, "sampling_rate": SR_IN}, chunk_length_s=28,
                             generate_kwargs={"language": "en", "task": "transcribe"})["text"].strip()
             _log(f"heard {text!r} in {time.time() - t0:.2f}s")
-            if _is_phantom(text):
+            if _is_phantom(text, loud=float(np.sqrt((x ** 2).mean())) >= 0.03 and len(x) >= SR_IN * 1.0, seconds=len(x) / SR_IN):
                 yield _ev(type="ignored", reason="noise", text=text)
                 yield _ev(type="done")
                 return
@@ -1125,15 +1260,20 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
                 sess.history.pop()  # an earlier turn was cancelled before it was answered; this one repeats it plus more
             sess.history.append({"role": "user", "content": text})
             llm_history = sess.history
-        said, t0 = [], time.time()
+        t0 = time.time()
         # Overlap the work: the language model keeps writing while earlier sentences get their voice and video.
         jobs: "queue.Queue" = queue.Queue()
 
         def render_sentence(sent: str, mood: str = ""):
+            if cancel.is_set():
+                return sent, b"", "", mood
             t_a = time.time()
-            wav = _speak(sess, sent)
+            try:
+                wav = _speak(sess, sent, cancel)
+            except _Cancelled:
+                return sent, b"", "", mood
             t_b = time.time()
-            vid = _talk_video_url(canonical_name, wav, mood)
+            vid = _talk_video_url(canonical_name, wav)
             _log(f"timing: sentence ready at +{t_a - t0:.1f}s | voice {t_b - t_a:.1f}s | video {time.time() - t_b:.1f}s | {sent[:40]!r}")
             return sent, wav, vid, mood
 
@@ -1141,7 +1281,11 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
             try:
                 with ThreadPoolExecutor(max_workers=2) as pool:
                     mood = "neutral"
-                    for sent in _sentences(_llm_stream(sess.system, llm_history)):
+                    # people who run short phrases together ("flow") keep longer chunks, so their phrases are not cut apart
+                    sizes = dict(first_min=30, first_max=60, later_min=50, later_max=110) if (getattr(sess, "voice_profile", None) or {}).get("flow") else {}
+                    for sent in _sentences(_llm_stream(sess.system, llm_history), **sizes):
+                        if cancel.is_set():
+                            break
                         sent, mood = _split_mood(sent, mood)
                         sent = _fix_names(sess, _clean(sent))
                         if sent:
@@ -1153,7 +1297,15 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
 
         threading.Thread(target=produce, daemon=True).start()
         while True:
-            item = jobs.get()
+            try:
+                item = jobs.get(timeout=0.15)
+            except queue.Empty:
+                if cancel.is_set():  # you hung up while the next part was still being made: stop waiting for it
+                    if said:
+                        sess.history.append({"role": "assistant", "content": " ".join(said)})
+                    _log(f"reply cut off by the person after {len(said)} chunk(s)")
+                    return
+                continue
             if item is None:
                 break
             if isinstance(item, Exception):
@@ -1173,6 +1325,15 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, sa
             sess.history.append({"role": "user", "content": "(the person has just opened the chat)" if nudge == GREETING_NUDGE else "(neither of you said anything for a while)"})
         sess.history.append({"role": "assistant", "content": " ".join(said)})  # tagged
         yield _ev(type="done")
+    except GeneratorExit:
+        # the page hung up: you spoke over the reply. Stop making voice and video for it, and keep what was actually handed over in the
+        # history, so the next answer knows where the conversation got to.
+        cancel.set()
+        if said:
+            sess.history.append({"role": "assistant", "content": " ".join(said)})
+            _log(f"reply cut off by the person after {len(said)} chunk(s)")
+        raise
     except Exception as exc:  # surface to the page instead of a silent hang
+        cancel.set()
         _log("ERROR", repr(exc))
         yield _ev(type="error", message=f"{type(exc).__name__}: {exc}")

@@ -1,9 +1,9 @@
-import { createVoiceChat } from "/static/voice-chat.js?v=24";
-import { loadCinematic } from "/static/cinematic-clips.js?v=34";
+import { createVoiceChat } from "/static/voice-chat.js?v=40";
+import { loadAvatarFace } from "/static/avatar-face.js?v=42";
 
 /**
- * The chat avatar: a photo-real face (live idle motion, pre-made clips, live reply videos) plus the voice chat.
- * If the photo-real layer is not available for a person, the still photo stays on screen and the voice still works.
+ * The chat avatar: the person's photo with its waiting animations and lip-sync reply videos, plus the voice chat.
+ * If the prepared photo is not available for a person, the still photo stays on screen and the voice still works.
  *
  * @param {HTMLElement} stageEl .avatar-stage
  * @param {object} profile profile_summary from API
@@ -16,8 +16,9 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
 
   // The first picture on screen is the person's prepared photo (the rest frame once their animations exist), never the raw scan
   // photo, so nothing in a different crop flashes up before the avatar loads.
-  const mediaBase = (stillPhoto.match(/^(.*\/profiles\/[^/]+\/media)\//) || [])[1] || "";
-  const firstPic = mediaBase ? `${mediaBase}/cinematic/idle_bank/rest.jpg?t=${Date.now()}` : stillPhoto;
+  const personBase = (stillPhoto.match(/^(.*\/profiles\/[^/]+)\/photo\//) || [])[1] || "";
+  const mediaBase = personBase ? personBase + "/cache" : "";
+  const firstPic = mediaBase ? `${mediaBase}/face/idle_bank/rest.jpg?t=${Date.now()}` : stillPhoto;
 
   stageEl.innerHTML = `
     <div class="stage-cols">
@@ -48,7 +49,7 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
   const stillEl = stageEl.querySelector("#avatar-still");
   if (stillEl && mediaBase) {
     // rest frame -> prepared photo -> raw scan photo, whichever exists first
-    const chain = [`${mediaBase}/cinematic/source.jpg`, stillPhoto];
+    const chain = [`${mediaBase}/face/source.jpg`, stillPhoto];
     stillEl.addEventListener("error", () => {
       const next = chain.shift();
       if (next) stillEl.src = next;
@@ -61,24 +62,26 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
   const meterBar = stageEl.querySelector("#chat-meter-bar");
   const meterThr = stageEl.querySelector("#chat-meter-thr");
   let chat = null;
-  let cinema = null; // photo-real layer: live idle face + pre-made clips + reply videos
+  let avatarFace = null; // the photo, its waiting animations and the reply videos
   let destroyed = false;
-  let chatBrainFoot = "";
+  let chatBrainFoot = ""; // the model that does the thinking, shown while it thinks
+  let chatVoiceFoot = ""; // the model that does the speaking, shown while it speaks
+  let chatEarsFoot = ""; // the model that does the listening, shown while it listens
 
-  // Load the photo-real layer straight away so the live face shows while the chat models start.
-  const cinemaReady = loadCinematic(stageEl, profile, { onNote: (m) => !destroyed && (statusEl.textContent = m) }).catch(() => null);
-  cinemaReady.then((c) => {
+  // Load the face layer straight away so the photo and its animations show while the chat models start.
+  const avatarFaceReady = loadAvatarFace(stageEl, profile, { onNote: (m) => !destroyed && (statusEl.textContent = m) }).catch(() => null);
+  avatarFaceReady.then((c) => {
     if (destroyed) c?.dispose();
-    else cinema = c;
+    else avatarFace = c;
   });
 
   /** Play one spoken sentence: a video of the person saying it when there is one, otherwise just the voice. */
   async function playClip(blob, videoUrl = "", onSpeak = null) {
     if (destroyed) return;
-    await cinema?.whenIdle();
-    if (cinema && videoUrl) {
-      statusEl.textContent = "Speaking…";
-      const played = await cinema.playReply(videoUrl, blob, (secs) => onSpeak?.(secs));
+    await avatarFace?.whenIdle();
+    if (avatarFace && videoUrl) {
+      statusEl.textContent = "Speaking…" + chatVoiceFoot;
+      const played = await avatarFace.playReply(videoUrl, blob, (secs) => onSpeak?.(secs));
       // a reply video is single-use: once it has played, the server throws it away
       setTimeout(() => {
         fetch("/api/chat/reply-played", {
@@ -89,9 +92,9 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
       }, 3000);
       if (played) return;
     }
-    cinema?.release(); // no video for this sentence: back to the live idle face while the voice plays
+    avatarFace?.release(); // no video for this sentence: the voice plays over the still picture
     audio.src = URL.createObjectURL(blob);
-    statusEl.textContent = "Speaking…";
+    statusEl.textContent = "Speaking…" + chatVoiceFoot;
     audio.addEventListener("playing", () => onSpeak?.(audio.duration), { once: true });
     await new Promise((resolve) => {
       const done = () => {
@@ -137,20 +140,6 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
     }
   }
 
-  /** Play a pre-made clip over the avatar; the mic is muted meanwhile so the chat does not hear it. */
-  async function playCinematic(kind) {
-    if (!cinema || destroyed) return false;
-    const wasMuted = chat ? chat.muted : false;
-    chat?.setMuted(true);
-    chat?.deafFor?.(180000); // a clip is playing: it is the avatar's turn (typing blocked too)
-    try {
-      return await cinema.play(kind);
-    } finally {
-      chat?.deafFor?.(1500); // the clip's sound is still fading out of the room
-      if (!wasMuted && !destroyed) chat?.setMuted(false);
-    }
-  }
-
   async function startChat() {
     try {
       statusEl.textContent = "Permissions: please allow your microphone";
@@ -164,6 +153,8 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
       if (j.status !== "ok") throw new Error(j.message || "chat could not start");
       if (destroyed) return;
       chatBrainFoot = j.llm_name ? ` (${j.llm_name}${j.llm_mode ? `, ${j.llm_mode}` : ""})` : "";
+      chatEarsFoot = j.ears_name ? ` (${j.ears_name})` : "";
+      chatVoiceFoot = j.voice_name ? ` (${j.voice_name})` : "";
       chat = createVoiceChat({
         name: profile.canonical_name,
         token: j.token,
@@ -175,8 +166,10 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
         },
         onStatus: (t) => {
           if (destroyed) return;
-          statusEl.textContent = t + chatBrainFoot;
-          if (/^Thinking/.test(t)) cinema?.settle(true); // the live face goes still so the reply video fades in from a match
+          const foot = /^Thinking/.test(t) ? chatBrainFoot : /listening|^Listening/.test(t) ? chatEarsFoot : "";
+          statusEl.textContent = t + foot;
+          statusEl.title = t + foot; // the whole line, when it is too long to fit
+          if (/^Thinking/.test(t)) avatarFace?.settle(true); // the next waiting animation follows at once and the reply video takes over from a calm frame
         },
         onPartial: (t) => {
           // what you are saying appears in the message box as you talk; when you stop it goes (the turn is sent) and the
@@ -215,9 +208,9 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
       await chat.start();
       statusEl.classList.remove("attention"); // the microphone was allowed
       muteBtn.disabled = false;
-      cinema = await cinemaReady;
-      if (!cinema) statusEl.textContent = "No photo-real face for this person yet (showing the still photo); the voice chat still works.";
-      if (!(cinema && (await playCinematic("greeting")))) await chat.greet();
+      avatarFace = await avatarFaceReady;
+      if (!avatarFace) statusEl.textContent = "No photo-real face for this person yet (showing the still photo); the voice chat still works.";
+      await chat.greet();
       chat.touch?.(); // the silence clock starts after the greeting, not while the models were loading
     } catch (e) {
       console.error(e);
@@ -252,7 +245,7 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
     document.body.classList.remove("wide-stage");
     audio?.pause();
     chat?.stop();
-    cinema?.dispose();
+    avatarFace?.dispose();
   };
 }
 

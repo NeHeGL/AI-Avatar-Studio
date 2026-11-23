@@ -49,11 +49,11 @@ def sync_with_disk(profile: UserProfile) -> UserProfile:
     shows the same counts: a photo or clip that was deleted from disk is dropped, and one that was put in the folder by hand (or
     left out of the record by an earlier bug) is added. The files are the truth."""
     from app.models import VoicePhase
-    from app.storage import media_dir, voice_dir
+    from app.storage import photo_dir, voice_dir
 
     name = profile.canonical_name
     try:
-        sd = media_dir(name) / "scan"
+        sd = photo_dir(name)
         have = {Path(a.path).name: a for a in profile.scan_assets if Path(a.path).exists()}
         if sd.is_dir():
             for f in sorted(sd.iterdir()):
