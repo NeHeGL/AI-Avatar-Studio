@@ -4,7 +4,7 @@
 
 The .exe is launcher.py packed with PyInstaller. Inside it: the app's own files (payload.zip) and the `uv` tool, which sets up Python 3.11 and the
 packages on first run. It holds none of your people, chats, voice samples or logs, and none of the large downloads (the Python packages, about
-3 GB of PyTorch, and the chat model, video engine and voice, about 14 GB): those are fetched when it is first run.
+3 GB of PyTorch, and the chat model, video engine and voice, about 22 GB): those are fetched when it is first run.
 The GitHub "Release" workflow runs this and attaches both files to the release. Needs `uv` (https://docs.astral.sh/uv/) on the PATH.
 """
 from __future__ import annotations

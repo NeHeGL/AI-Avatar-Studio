@@ -69,12 +69,12 @@ jobs:
 
             ### Install
             1. Download **AI Avatar Studio.exe** below (not the automatic "Source code" files)
-            2. Put it in the folder, or on the drive, where you want the app and its downloads to live (about 25 GB)
-            3. Double-click it. The first run unpacks the app beside it, installs Python and the packages, and starts the app; the chat model, video engine and voice (about 14 GB) download with progress on the start screen. After that it starts straight away.
+            2. Put it in the folder, or on the drive, where you want the app and its downloads to live (about 30 GB)
+            3. Double-click it. The first run unpacks the app beside it, installs Python and the packages, and starts the app; the chat model, video engine and voice (about 22 GB) download with progress on the start screen. After that it starts straight away.
 
             Windows may warn about an unknown publisher because the program is not signed: choose **More info**, then **Run anyway**.
 
             ### Requirements
             - Windows 10/11 (64-bit). You do not need to install Python.
             - An NVIDIA graphics card (RTX 20-series or newer; 16 GB of video memory works, 32 GB is best)
-            - About 25 GB of free disk space for the one-time install, and an internet connection for it
+            - About 30 GB of free disk space for the one-time install, and an internet connection for it

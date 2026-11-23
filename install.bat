@@ -56,7 +56,7 @@ if errorlevel 1 ( echo  [ERROR] Speech package install failed. See above. & paus
 :: -- Chat brain, video renderer, face detector ----------------
 :: (When started from a Start bat, the app downloads these itself, with progress on its start screen.)
 if defined AVATAR_BASE_ONLY goto :done
-echo  [4/4] Chat brain, video renderer and face detector (about 14 GB, one time)...
+echo  [4/4] Chat brain, video renderer and face detector (about 22 GB, one time)...
 "%PY%" installer.py
 if errorlevel 1 ( echo  [ERROR] Some downloads failed. Run install.bat again to resume. & pause & exit /b 1 )
 

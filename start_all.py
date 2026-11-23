@@ -41,6 +41,18 @@ def _brain_model() -> Path:
 
 
 BRAIN_PORT = int(os.environ.get("AVATAR_BRAIN_PORT", "8772"))
+
+
+def _video_files() -> Path:
+    """The video renderer needs its code and all its weights, which the app downloads on the first run. Until they are all there it is not
+    started (it would only crash, and use up the restarts the launcher allows); the launcher starts it as soon as they are."""
+    sys.path.insert(0, str(ROOT / "ml" / "realtime"))
+    import setup_flashhead
+
+    server = ROOT / "ml" / "realtime" / "flashhead_render_server.py"
+    return server if setup_flashhead.complete() else server.with_name("_video_not_downloaded_yet")
+
+
 # (name, program, arguments, log file, file that must exist)
 CHILDREN = [
     ("chat brain", BRAIN / "bin" / "llama-server.exe",
@@ -48,8 +60,7 @@ CHILDREN = [
                        # no "thinking" out loud: some models (Gemma 4) write their reasoning first, and the avatar would speak it
                        "--reasoning", "off", "--reasoning-format", "deepseek", "--chat-template-kwargs", '{"enable_thinking": false}'],
      "brain.out.log", lambda: _brain_model()),
-    ("video renderer", Path(sys.executable), [ROOT / "ml" / "realtime" / "flashhead_render_server.py"], "flashhead.out.log",
-     ROOT / "ml" / "realtime" / "flashhead_render_server.py"),
+    ("video renderer", Path(sys.executable), [ROOT / "ml" / "realtime" / "flashhead_render_server.py"], "flashhead.out.log", _video_files),
 ]
 
 # ---- a Windows job object: when this process ends for any reason, everything in the job is closed too ----

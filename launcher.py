@@ -1,7 +1,7 @@
 """AI Avatar Studio.exe: unpacks the app next to itself, sets up Python and the packages the first time, then starts it.
 
 The .exe carries the app's own files (payload.zip) and the `uv` tool (uv.exe), so nothing has to be installed first, not even Python. It is
-built by build_standalone.py. Put it in the folder (or on the drive) where you want the app and its downloads to live (about 25 GB in all): it
+built by build_standalone.py. Put it in the folder (or on the drive) where you want the app and its downloads to live (about 30 GB in all): it
 creates an "AI Avatar Studio" folder beside itself.
 
   "AI Avatar Studio.exe"              set up whatever is missing, then start the app
@@ -114,7 +114,7 @@ def bootstrap(app: Path, dry: bool) -> None:
     run(base + ["-r", "requirements.txt"], app, "Installing the Python packages")
     run(base + ["--no-deps", "qwen-tts==0.1.1"], app, "Installing the voice package")
     run(base + ["--no-deps", "faster-whisper"], app, "Installing the speech package")
-    say("  [4/4] The chat model, video engine and face detector (about 14 GB) are downloaded by the app itself, with progress on its start screen.")
+    say("  [4/4] The chat model, video engine and face detector (about 22 GB) are downloaded by the app itself, with progress on its start screen.")
 
 
 def stop_old_servers() -> None:

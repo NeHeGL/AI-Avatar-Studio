@@ -1,7 +1,7 @@
 """Install the talking-video renderer (SoulX-FlashHead-Lite) into ml/realtime/flashhead: its code and models.
 Its Python libraries are part of the app's one environment (requirements.txt).
 
-Run by installer.py. Safe to run again: finished steps are skipped. Needs internet; about 6 GB.
+Run by installer.py. Safe to run again: finished steps are skipped. Needs internet; about 8 GB.
 """
 from __future__ import annotations
 
@@ -16,6 +16,20 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 FH = HERE / "flashhead"
 ZIP = "https://github.com/Soul-AILab/SoulX-FlashHead/archive/refs/heads/main.zip"
+
+# Everything the renderer opens. The install counts as finished only when ALL of these are there, so a download that stopped half way is
+# resumed (and the renderer is not started before they exist: it would only crash). The Lite model needs the LTX VAE; the Wan one belongs to the Pro model.
+REQUIRED = [
+    "flash_head",
+    "models/SoulX-FlashHead-1_3B/Model_Lite/diffusion_pytorch_model.safetensors",
+    "models/SoulX-FlashHead-1_3B/VAE_LTX/diffusion_pytorch_model.safetensors",
+    "models/wav2vec2-base-960h/model.safetensors",
+    "models/wav2vec2-base-960h/pytorch_model.bin",
+]
+
+
+def complete() -> bool:
+    return all((FH / r).exists() for r in REQUIRED)
 
 
 def run(*args: str, check: bool = True) -> int:
@@ -46,7 +60,7 @@ def main(base_python: str, cb=None) -> int:
         shutil.rmtree(tmp, ignore_errors=True)
     say("setup", 0)
     models = FH / "models"
-    if not (models / "SoulX-FlashHead-1_3B").exists() or not (models / "wav2vec2-base-960h").exists():
+    if not complete():
         from huggingface_hub import snapshot_download
         from tqdm.auto import tqdm
 
@@ -67,7 +81,7 @@ def main(base_python: str, cb=None) -> int:
 
         say("download", 0)
         snapshot_download("Soul-AILab/SoulX-FlashHead-1_3B", local_dir=str(models / "SoulX-FlashHead-1_3B"),
-                          allow_patterns=["Model_Lite/*", "*.json", "*.md", "*.txt"], tqdm_class=_Bar)
+                          allow_patterns=["Model_Lite/*", "VAE_LTX/*", "*.json", "*.md", "*.txt"], tqdm_class=_Bar)
         snapshot_download("facebook/wav2vec2-base-960h", local_dir=str(models / "wav2vec2-base-960h"),
                           allow_patterns=["*.json", "*.txt", "*.safetensors", "*.bin"], tqdm_class=_Bar)
     print("Video renderer ready.")

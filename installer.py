@@ -30,7 +30,10 @@ def missing() -> list[str]:
         have_model = any(models.glob("*.gguf"))
     if not (ROOT / "brain" / "bin" / "llama-server.exe").exists() or not have_model:
         out.append("chat brain")
-    if not (FH / "flash_head").exists() or not (FH / "models" / "SoulX-FlashHead-1_3B").exists():
+    sys.path.insert(0, str(ROOT / "ml" / "realtime"))
+    import setup_flashhead
+
+    if not setup_flashhead.complete():
         out.append("video renderer")
     if not YUNET.exists():
         out.append("face detector")
@@ -98,7 +101,7 @@ def main() -> int:
         print("\n== Chat brain (about 8 GB) ==")
         subprocess.run([sys.executable, str(ROOT / "brain" / "setup_brain.py")], check=True)
     if "video renderer" in missing():
-        print("\n== Video renderer (about 6 GB) ==")
+        print("\n== Video renderer (about 8 GB) ==")
         subprocess.run([sys.executable, str(ROOT / "ml" / "realtime" / "setup_flashhead.py"), sys.executable], check=True)
     m = missing()
     print("\nEverything is installed." if not m else "\nStill missing: " + ", ".join(m))

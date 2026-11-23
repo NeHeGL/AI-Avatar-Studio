@@ -1,5 +1,7 @@
 # AI Avatar Studio
 
+![AI Avatar Studio: it listens, thinks, speaks and animates a face, all on your own PC](https://raw.githubusercontent.com/NeHeGL/AI-Avatar-Studio/main/docs/banner.png)
+
 **Talk to someone you miss.** AI Avatar Studio builds a talking avatar of a person from a few photos, a voice recording and what you can tell it about them, then lets you have a spoken conversation with it. Everything runs on your own PC. Nothing is sent to anyone.
 
 I made this because I want to bring people back from the dead, even just for a conversation. You tell it about the person, give it their face and their voice, and it tries to be them: it knows their family, their stories, how they talked, and it answers out loud, with their face, in their voice.
@@ -33,12 +35,12 @@ A conversation feels dead if every reply has a pause in front of it. A lot of th
 
 On a 16 GB card it fits, with about 1 GB to spare. Tested by reserving the rest of a larger card, so that Windows and the app had exactly 16 GB: it loaded, transcribed speech and answered four turns in a row with no memory errors, using about 11.5 GB when idle and 12.5 GB while it answers, plus Windows' own share, for a peak of about 15 GB. The first sound took 7 to 10 seconds. Close other programs that use the graphics card (browsers playing video, games). It has not been run on a real 16 GB card, whose speed will differ.
 
-Windows 10/11, an NVIDIA card (RTX 20-series or newer), and about 25 GB of free disk space (Python 3.11 only if you run from the source code). The first start downloads about 14 GB of models, once.
+Windows 10/11, an NVIDIA card (RTX 20-series or newer), and about 30 GB of free disk space (Python 3.11 only if you run from the source code). The first start downloads about 22 GB of models, once.
 
 ## Install and run
 
-1. Download **AI Avatar Studio.exe** from the latest [Release](../../releases) and put it in the folder, or on the drive, where you want the app and its downloads to live (about 25 GB).
-2. Double-click it. The first run unpacks the app into an `AI Avatar Studio` folder beside it, installs Python and the packages itself (you do not need to install Python), and starts the app. The chat model, video engine and voice (about 14 GB) download with progress on the app's start screen. After that it starts straight away.
+1. Download **AI Avatar Studio.exe** from the latest [Release](../../releases) and put it in the folder, or on the drive, where you want the app and its downloads to live (about 30 GB).
+2. Double-click it. The first run unpacks the app into an `AI Avatar Studio` folder beside it, installs Python and the packages itself (you do not need to install Python), and starts the app. The chat model, video engine and voice (about 22 GB) download with progress on the app's start screen. After that it starts straight away.
 
 Windows may warn about an unknown publisher, because the program is not signed: choose **More info**, then **Run anyway**.
 
@@ -74,6 +76,13 @@ Put a chat-tuned `.gguf` file in `brain/models/` and name it `custom-<anything>.
 - The video model redraws the face for every frame, so it works best on real photos and badly on cartoons.
 - Voice cloning from a short, noisy recording will not sound like the person. More clean speech helps a lot.
 - It is a likeness built from what you give it, not the person. Use it with respect, and only with the voice and face of people you have the right to use.
+
+## License
+
+Created by Jeff Molofee (NeHe) 2026  
+Free to use and modify
+
+The models this program downloads (the chat model, the voice, speech recognition and the video engine) and the libraries it uses have their own licenses, which apply to them. They are not part of this repository.
 
 ## About
 
