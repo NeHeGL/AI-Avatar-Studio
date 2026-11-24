@@ -2,9 +2,9 @@
 
 ![AI Avatar Studio: it listens, thinks, speaks and animates a face, all on your own PC](https://raw.githubusercontent.com/NeHeGL/AI-Avatar-Studio/main/docs/banner.png)
 
-**Talk to someone you miss.** AI Avatar Studio builds a talking avatar of a person from a few photos, a voice recording and what you can tell it about them, then lets you have a spoken conversation with it. Everything runs on your own PC. Nothing is sent to anyone.
+**Talk with someone you miss, a friend far away, a character you made up, or yourself.** AI Avatar Studio builds a talking avatar of a person from a few photos, a voice recording and what you can tell it about them, then lets you have a spoken conversation with it. Everything runs on your own PC. Nothing is sent to anyone.
 
-I made this because I want to bring people back from the dead, even just for a conversation. You tell it about the person, give it their face and their voice, and it tries to be them: it knows their family, their stories, how they talked, and it answers out loud, with their face, in their voice.
+I made this because I wanted to bring people back, even just for a conversation. It could be someone who has passed, a relative you do not get to see often, an old friend, or you: sit down and talk to yourself, or to who you were. You tell it about the person, give it their face and their voice, and it tries to be them: it knows their family, their stories, how they talked, and it answers out loud, with their face, in their voice.
 
 ![The chat screen: the avatar on the left, the conversation on the right](https://raw.githubusercontent.com/NeHeGL/AI-Avatar-Studio/main/app_image.jpg)
 
