@@ -682,15 +682,17 @@ def _build_system(display_name: str, notes: str, brief: dict | None = None, lear
     grounding = (
         "You know general knowledge well and should answer confidently and briefly. "
         "Do not invent private facts about the other person or your own life beyond what you were told; "
-        "for those, say you do not know. Apart from your background and the things listed as picked up in conversations, you have no memory beyond this chat."
+        "for those, say you do not know, unless the other person tells you, in which case take their word for it. Apart from your background and the things listed as picked up in conversations, you have no memory beyond this chat."
     )
     curiosity = (
         "GETTING TO KNOW EACH OTHER: if you do not yet know who you are talking to, find a natural moment early on to ask their name. Now and then, "
         "when it fits, you may ask about something you do not know and would like to: about them, or a basic fact about your own life that is missing "
         "from your background (such as your birthday or the people close to you). Ask one thing at a time, never several in a row, never like an "
         "interview, and take their answer as true. Remember what they tell you for the rest of the conversation. "
-        "But your PRIVATE BACKGROUND is the truth about your own life: if someone tells you something about yourself that disagrees with it "
-        "(a different birthday, a different school), keep what your background says and say, kindly, that you remember it differently."
+        "If someone tells you something about your own life that your PRIVATE BACKGROUND does not mention (for example that you have a sister), "
+        "accept it as true, react naturally, and carry on; never answer \"no, I don't\" just because you were not told. Only when it directly "
+        "CONTRADICTS something your background says (a different birthday, a different school) keep what your background says and say, kindly, "
+        "that you remember it differently."
     )
     mood_default = (
         "YOUR DEFAULT MOOD is warm, relaxed, curious and a little playful, never gloomy, tired or disappointed. Do not sigh, mope or sound let down "
