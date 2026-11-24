@@ -81,6 +81,10 @@ export function createVoiceChat(o) {
   let stopped = false;
   let resumeAt = 0;
   let floor = 0.004; // running estimate of room noise
+  let lastWordsAt = 0; // when the live transcript last grew: words that stop changing mean you have finished
+  let liveText = "";
+  let sentAt = 0; // when the current question was sent: you can only add to it for a few seconds after
+  const MERGE_WINDOW_MS = 3000; // add-ons later than this are a new message, answered after the current reply
   let longestQuietMs = 0; // the longest pause inside the current stretch of sound
   let speaking = false;
   let loud = 0;
@@ -240,6 +244,7 @@ export function createVoiceChat(o) {
       .then((j) => {
         if (gen !== partialGen || !speaking || !j.text) return;
         liveWords = Math.max(liveWords, String(j.text).trim().split(/\s+/).length);
+        if (j.text !== liveText) { liveText = j.text; lastWordsAt = performance.now(); }
         o.onPartial?.(j.text);
       })
       .catch(() => {})
@@ -255,6 +260,7 @@ export function createVoiceChat(o) {
       mergePrev = null;
     }
     turnAudio = got;
+    sentAt = performance.now();
     const wav = encodeWav16k(got, ctx.sampleRate);
     blobToBase64(wav).then((b64) => runTurn({ audio_base64: b64 }));
   }
@@ -278,6 +284,8 @@ export function createVoiceChat(o) {
 
   function startSpeaking() {
     liveWords = 0;
+    liveText = "";
+    lastWordsAt = performance.now();
     speaking = true;
     loudMs = 0;
     chunks = [...preroll];
@@ -319,7 +327,7 @@ export function createVoiceChat(o) {
       loud = rms > threshold ? loud + 1 : 0;
       if (rms > threshold) lastLoudAt = performance.now();
       if (loud >= 2) {
-        if (busy && (turnAudio || turnNudge) && !replyStarted) {
+        if (busy && (turnAudio || turnNudge) && !replyStarted && (turnNudge || now - sentAt < MERGE_WINDOW_MS)) {
           if (loud < 4) return; // a click or a bump is not you
           // still thinking, nothing said yet: drop that reply. If it was an answer to you, both parts go together; if it was something it
           // started by itself (a greeting, speaking up), you are simply answered now instead of after all of it
@@ -364,7 +372,13 @@ export function createVoiceChat(o) {
       if (mergePrev) sendHeard([]);
       return;
     }
-    if (quietMs >= 1800 || speechMs > 15000) { // wait for a clear end: a short pause mid-sentence does not end the turn
+    // The end of what you said: a short remark ends after a short pause (so it is answered while it is still a short sentence), a long
+    // one waits a little longer for you to breathe. Words that stopped changing also end it, so a hum or a fan that never goes quiet
+    // cannot keep the turn open.
+    const spoken = speechMs - quietMs;
+    const endQuiet = spoken < 3500 ? 1000 : spoken < 8000 ? 1300 : 1600;
+    const wordsDone = liveWords >= 1 && spoken > 1500 && performance.now() - lastWordsAt > 1800;
+    if (quietMs >= endQuiet || wordsDone || speechMs > 15000) {
       const got = chunks;
       partialGen++;
       o.onPartial?.("");

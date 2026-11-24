@@ -1,4 +1,4 @@
-import { createVoiceChat } from "/static/voice-chat.js?v=40";
+import { createVoiceChat } from "/static/voice-chat.js?v=41";
 import { loadAvatarFace } from "/static/avatar-face.js?v=42";
 
 /**
