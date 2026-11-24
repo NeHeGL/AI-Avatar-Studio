@@ -284,7 +284,12 @@ export async function loadAvatarFace(stageEl, profile, opts = {}) {
   let current = null; // promise of the running reply
 
   /** Common run-loop: show a video, play a voice, resolve shortly after the voice ends. The last frame stays up. */
+  let runGen = 0; // bumped when you talk over a reply: a sentence that has not started yet is never started
+  function cancelPending() {
+    runGen++;
+  }
   function run({ videoUrl, voiceUrl, maxMs, label, onStart }) {
+    const gen = runGen;
     mainActive = true;
     clearTimeout(bankTimer);
     clearTimeout(resumeTimer);
@@ -345,7 +350,10 @@ export async function loadAvatarFace(stageEl, profile, opts = {}) {
         finish(false);
       });
       whenRest()
-        .then(() => startVideo(videoUrl))
+        .then(() => {
+          if (gen !== runGen) throw Object.assign(new Error("cancelled"), { name: "CancelledError" });
+          return startVideo(videoUrl);
+        })
         .then(() =>
           voice
             .play()
@@ -353,6 +361,7 @@ export async function loadAvatarFace(stageEl, profile, opts = {}) {
             .finally(() => onStart?.(voice.duration)),
         )
         .catch((e) => {
+          if (e?.name === "CancelledError") return finish(true); // you spoke: this sentence is dropped without being played
           note(`The ${label} picture could not start (${e?.name || e}).`);
           finish(false);
         });
@@ -377,6 +386,7 @@ export async function loadAvatarFace(stageEl, profile, opts = {}) {
 
   return {
     playReply,
+    cancelPending,
     release,
     whenIdle: () => current || Promise.resolve(),
     settle,

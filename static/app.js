@@ -264,7 +264,7 @@ async function runUpdateSection(section) {
     const result = await runPhotoStep(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if (section === "voice") {
-    const { runVoiceStep } = await import("/static/voice-capture.js?v=11");
+    const { runVoiceStep } = await import("/static/voice-capture.js?v=12");
     const result = await runVoiceStep(root, state.canonicalName, api);
     if (result?.profile) state.profile = result.profile;
   } else if ((await openFactsEditor()) === false) {
@@ -443,7 +443,7 @@ async function renderAvatar(result, afterUpdate = false) {
   const mode = result?.avatar_mode || (profile?.avatar_ready ? "live" : "placeholder");
   root.innerHTML = `<section class="card avatar-stage" id="avatar-stage"></section>`;
   const stage = document.getElementById("avatar-stage");
-  const { mountAvatarPlayer } = await import("/static/avatar-player.js?v=143");
+  const { mountAvatarPlayer } = await import("/static/avatar-player.js?v=151");
   avatarTeardown = mountAvatarPlayer(stage, profile || {}, {
     onBackProfile: () => {
       avatarTeardown?.();
@@ -488,7 +488,7 @@ import {
   runSetupPipeline,
   setOnboardingView,
   setPhaseLabels,
-} from "/static/onboarding-flow.js?v=26";
+} from "/static/onboarding-flow.js?v=27";
 
 /** Startup screen: the chat brain, ears, speech engine and video animation load once, here, so everything is ready when a person is picked. */
 const STARTUP_ROWS = [

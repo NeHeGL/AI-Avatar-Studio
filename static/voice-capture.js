@@ -227,7 +227,7 @@ function stamp(sec) {
 
 /** The Voice screen, laid out like the Photo screen: your recordings as tiles (click one to play it, x to delete it), then two ways to add
  * another: record a new one (you read a short passage) or upload an audio file. */
-export async function runVoiceStep(root, canonicalName, api) {
+export async function runVoiceStep(root, canonicalName, api, opts = {}) {
   const hb = document.getElementById("logout-btn");
   if (hb) hb.style.display = "none"; // this screen has its own Done
   document.body.classList.add("wide-stage");
@@ -238,7 +238,7 @@ export async function runVoiceStep(root, canonicalName, api) {
       player.pause();
       if (hb) hb.style.display = "";
       document.body.classList.remove("wide-stage");
-      resolve(profile ? { profile } : null);
+      resolve(profile ? { profile } : opts.skippable ? { skipped: true } : null);
     };
     async function show() {
       player.pause();
@@ -271,7 +271,7 @@ export async function runVoiceStep(root, canonicalName, api) {
           <button type="button" class="photo-option" id="vs-up"${full ? " disabled" : ""}><strong>Upload audio</strong><span>Choose a recording of your voice (wav, mp3, m4a, ogg). Clear speech with little background noise works best.</span></button>
         </div>
         <input type="file" id="vs-file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm,.flac" hidden />
-        <div class="step-actions step-actions--row"><button type="button" class="btn-ghost" id="vs-done">Done</button></div>`;
+        <div class="step-actions step-actions--row"><button type="button" class="btn-ghost" id="vs-done">${clips.length ? "Done" : opts.skippable ? "Skip for now" : "Cancel"}</button></div>`;
       root.innerHTML = "";
       root.appendChild(wrap);
       wrap.querySelector("#vs-done").onclick = finish;

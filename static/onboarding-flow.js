@@ -57,37 +57,10 @@ export async function runSetupPipeline(ctx, opts = {}) {
 
   if (needVoice) {
     setPhaseLabels(phaseLabel, statusHint, "", "");
-    transition(
-      root,
-      `
-      <section class="step-card step-card--center">
-        <h2 class="step-title">We'll scan your voice</h2>
-        <p class="step-copy">You'll read a short line aloud so your avatar can sound like you.</p>
-        <div class="step-actions step-actions--solo">
-          <button type="button" class="btn-primary" id="ob-voice">Continue</button>
-        </div>
-      </section>`
-    );
-    await waitClick("ob-voice");
-
-    const { runVoiceCapture } = await import("/static/voice-capture.js?v=11");
-    let voiceResult = await runVoiceCapture(root, state.canonicalName, api);
-    while (!voiceResult?.profile) {
-      transition(
-        root,
-        `
-        <section class="step-card step-card--center">
-          <h2 class="step-title">We'll scan your voice</h2>
-          <p class="step-copy">You'll read a short line aloud so your avatar can sound like you.</p>
-          <div class="step-actions step-actions--solo">
-            <button type="button" class="btn-primary" id="ob-voice-retry">Continue</button>
-          </div>
-        </section>`
-      );
-      await waitClick("ob-voice-retry");
-      voiceResult = await runVoiceCapture(root, state.canonicalName, api);
-    }
-    state.profile = voiceResult.profile;
+    // Like the photo: read the lines aloud, upload an audio clip, or skip for now.
+    const { runVoiceStep } = await import("/static/voice-capture.js?v=12");
+    const voiceResult = await runVoiceStep(root, state.canonicalName, api, { skippable: true });
+    if (voiceResult?.profile) state.profile = voiceResult.profile;
   }
 
   if ((needFace || needVoice) && !state.profile?.facts_preview?.notes) {

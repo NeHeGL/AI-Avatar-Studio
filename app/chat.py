@@ -643,7 +643,9 @@ def _build_system(display_name: str, notes: str, brief: dict | None = None, lear
         "addictions, money, regrets or other personal history on your own, and never as an opener. Mention something from it ONLY when the other "
         "person raises that subject or asks, and then only the bit that is relevant, in a few natural words, the way someone remembers in "
         "passing. Hard or private things (illness, drinking, divorce, death, mistakes) come up only if THEY bring them up first. "
-        "Most of the time, talk about the present moment and what they say; the background simply colours how you react."
+        "Most of the time, talk about the present moment and what they say; the background simply colours how you react. "
+        "If the other person tells you something about yourself that your background does not contradict (your job, a talent, something you did), "
+        "take it as true, as news about your own life, and go along with it; do not argue that it is not so."
     )
     brief = brief or {}
     length = _CHATTY_RULE.get(int(brief.get("chattiness", 3) or 3), _CHATTY_RULE[3])
@@ -821,6 +823,7 @@ class Session:
         self.busy = False  # a reply is being made right now (the note-taking waits for it)
         self.learn_pending: list[tuple[str, str]] = []  # (what the avatar had said, what the person answered), not yet read for facts
         self.learn_retries = 0
+        self.curious: list[str] = []  # follow-up questions it wants to ask when there is a natural moment (see _nudge_prompt)
         entered = notes
         try:
             from app.storage import get_working_profile
@@ -1053,30 +1056,35 @@ def _speak(sess: Session, text: str, cancel: "threading.Event | None" = None) ->
 
 
 def _speak_takes(spoken: str, tries: int, n_words: int, lo_s: float, hi_s: float, window, cancel) -> bytes:
-    best = None  # (passed the checks, samples, sample rate)
+    best = None  # (passed the checks, likeness, samples, sample rate)
     for attempt in range(tries):
         x, sr = _take(spoken, hi_s)
         if cancel is not None and cancel.is_set():
             raise _Cancelled()
         dur = len(x) / sr
         ok = lo_s <= dur < hi_s - 0.3  # a take that ran into the cap was cut off
+        mp = _median_pitch(x, sr) if ok else None
         if ok and window:
-            mp = _median_pitch(x, sr)
             if mp is not None and not (window[0] <= mp <= window[1]):
                 ok = False
-                _log(f"voice take rejected: pitch {mp:.0f} Hz outside {window[0]}-{window[1]} (try {attempt + 1})")
+                _log(f"voice take rejected: pitch {mp:.0f} Hz outside {window[0]:.0f}-{window[1]:.0f} (try {attempt + 1})")
         elif not ok:
             _log(f"voice take rejected: {dur:.1f}s for {n_words} words (try {attempt + 1})")
-        if ok:
-            sim = _likeness(x, sr)
-            if sim is not None and sim < VOICE_LIKENESS_MIN:
-                ok = False
-                _log(f"voice take rejected: does not sound like the person (likeness {sim:.3f}, needs {VOICE_LIKENESS_MIN}) (try {attempt + 1})")
-        if best is None or (ok and not best[0]):
-            best = (ok, x, sr)
+        sim = _likeness(x, sr) if dur > 0.3 else None
+        if ok and sim is not None and sim < VOICE_LIKENESS_MIN:
+            ok = False
+            _log(f"voice take rejected: does not sound like the person (likeness {sim:.3f}, needs {VOICE_LIKENESS_MIN}) (try {attempt + 1})")
+        _log(f"voice take {attempt + 1}/{tries}: {'ok' if ok else 'rejected'}, {dur:.1f}s, pitch {mp:.0f} Hz" if mp else f"voice take {attempt + 1}/{tries}: {'ok' if ok else 'rejected'}, {dur:.1f}s",
+             f"likeness {sim:.3f}" if sim is not None else "")
+        score = sim if sim is not None else 0.0
+        # keep the best take so far: one that passed beats one that did not; between equals, the one most like the person
+        if best is None or (ok, score) > (best[0], best[1]):
+            best = (ok, score, x, sr)
         if ok:
             break
-    return _wav_bytes(_level_to(best[1], best[2]), best[2])
+    if not best[0]:
+        _log("no take passed the voice checks; using the one closest to the person's voice")
+    return _wav_bytes(_level_to(best[2], best[3]), best[3])
 
 
 def _reply_video_url(canonical_name: str, wav_bytes: bytes) -> str:
@@ -1218,7 +1226,7 @@ FREE_THOUGHTS = [
 ]
 
 
-def _nudge_prompt(n: int, canonical_name: str = "", display: str = "") -> str:
+def _nudge_prompt(n: int, canonical_name: str = "", display: str = "", curious: str = "") -> str:
     import datetime
     import random
 
@@ -1226,6 +1234,9 @@ def _nudge_prompt(n: int, canonical_name: str = "", display: str = "") -> str:
         if canonical_name and canonical_name not in _introduced_this_run:  # the first chat since the program started: introduce yourself
             return _intro_prompt(display or canonical_name, first_ever=not _intro_marker(canonical_name).exists())
         return _greeting_prompt()
+    if curious and int(n) != GREETING_NUDGE:
+        return (f"(It has been quiet. Something the person told you has been on your mind and you are curious about it. Ask them, in your own words, "
+                f"something like: \"{curious}\" One short, natural sentence, no preamble. Do not mention this note.)")
     if int(n) <= 3 and random.random() < 0.7:  # mostly a free thought; the older styled prompts (boredom, games...) fill in the rest
         now = datetime.datetime.now()
         part = "morning" if now.hour < 12 else "afternoon" if now.hour < 18 else "evening"
@@ -1236,7 +1247,7 @@ def _nudge_prompt(n: int, canonical_name: str = "", display: str = "") -> str:
 
 
 def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, token: str | None = None, nudge: int | None = None,
-                cancel: "threading.Event | None" = None):
+                cancel: "threading.Event | None" = None, prefix: str | None = None):
     if token != _owner["token"]:
         yield _ev(type="superseded")
         return
@@ -1278,12 +1289,15 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, to
                 yield _ev(type="ignored", reason="echo", text=text)
                 yield _ev(type="done")
                 return
+        if prefix and audio_b64 and text:
+            text = f"{prefix.strip()} {text}".strip()  # what was typed, then what was said after it: one message
         if not text and not nudge:
             yield _ev(type="done")
             return
         if nudge:
             # a private note to the model; it is not shown as something the person said
-            llm_history = sess.history + [{"role": "user", "content": _nudge_prompt(nudge, canonical_name, sess.name)}]
+            ask_now = sess.curious.pop(0) if sess.curious and nudge != GREETING_NUDGE else ""  # something it is curious about goes first
+            llm_history = sess.history + [{"role": "user", "content": _nudge_prompt(nudge, canonical_name, sess.name, ask_now)}]
         else:
             yield _ev(type="heard", text=text)
             if sess.history and sess.history[-1]["role"] == "assistant":
@@ -1350,6 +1364,11 @@ def turn_stream(canonical_name: str, audio_b64: str | None, text: str | None, to
             del sess.recent_said[:-12]
             yield _ev(type="say", text=sent, mood=mood, audio=base64.b64encode(wav).decode(), video_url=video_url)
             _log(f"said {sent!r} (+{time.time() - t0:.1f}s)")
+        if not said and not cancel.is_set():
+            # the model gave nothing to say: tell the page (it used to just go back to "your turn", with no reply and no explanation)
+            _log("the chat model returned an empty reply")
+            yield _ev(type="error", message="I lost my train of thought. Could you say that again?")
+            return
         if nudge == GREETING_NUDGE and said:
             _introduced_this_run.add(canonical_name)
             m = _intro_marker(canonical_name)
@@ -1434,6 +1453,14 @@ def _learn_now(sess: "Session") -> None:
             facts = _learned.extract(_ask_notes, sess.name, known_facts, known_learned, pending)
             added = _learned.add(sess.canonical, facts)
             _log(f"noted {len(added)} new thing(s): {added}" if added else "nothing new to note")
+            if added:
+                try:  # what it would now like to know: asked later, when it is quiet
+                    qs = _learned.curious(_ask_notes, sess.name, added, known_learned)
+                    sess.curious = (sess.curious + [q for q in qs if q not in sess.curious])[-4:]
+                    if qs:
+                        _log(f"wants to ask: {qs}")
+                except Exception as exc:
+                    _log("could not think of questions:", exc)
         except Exception as exc:  # taking notes is a bonus: never let it break the chat
             _log("could not take notes:", exc)
     finally:

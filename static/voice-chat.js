@@ -68,6 +68,7 @@ export function createVoiceChat(o) {
   let node = null;
   let superseded = false;
   let busy = false; // avatar is thinking or talking
+  let introPending = true; // the opening introduction has not finished yet: it always comes first, so what you say before it is answered after it
   // Half-duplex: the avatar's own voice reaches the microphone as loudly as yours (and your avatar sounds like you), so nothing can tell them
   // apart. The microphone is therefore ignored completely from the moment it has something to say until a moment after it finishes. While it is
   // still THINKING, it listens: carry on talking and your parts are joined into one question.
@@ -83,8 +84,6 @@ export function createVoiceChat(o) {
   let floor = 0.004; // running estimate of room noise
   let lastWordsAt = 0; // when the live transcript last grew: words that stop changing mean you have finished
   let liveText = "";
-  let sentAt = 0; // when the current question was sent: you can only add to it for a few seconds after
-  const MERGE_WINDOW_MS = 3000; // add-ons later than this are a new message, answered after the current reply
   let longestQuietMs = 0; // the longest pause inside the current stretch of sound
   let speaking = false;
   let loud = 0;
@@ -100,7 +99,7 @@ export function createVoiceChat(o) {
   let nudgeTimer = 0;
   let lastLoudAt = 0; // any sound above the room noise: it does not start talking on its own while you may be about to speak
   function maybeNudge() {
-    if (stopped || busy || muted || speaking || loud > 0 || performance.now() - lastLoudAt < 6000 || nudges >= quietGaps.length) return;
+    if (stopped || busy || introPending || muted || speaking || loud > 0 || performance.now() - lastLoudAt < 6000 || nudges >= quietGaps.length) return;
     if (performance.now() - lastActive < quietGaps[nudges] * 1000 * (0.75 + Math.random() * 0.5)) return;
     nudges += 1;
     void runTurn({ nudge: nudges });
@@ -110,9 +109,12 @@ export function createVoiceChat(o) {
   // two parts are sent together as one question.
   let turnAudio = null; // the recorded chunks of the turn being answered (null for typed / self-started turns)
   let replyStarted = false;
+  let turnGreeting = false; // the reply being worked on is the opening introduction
   let turnNudge = false; // the reply being worked on is one it started by itself (a greeting or speaking up), not an answer to you
   let turnCtl = null;
   let mergePrev = null;
+  let mergeText = null; // a typed message that was still being answered when you started talking: the speech is added to it
+  let turnText = ""; // the typed text of the turn being answered
   let heardShown = false; // this turn's "You: ..." line is already on screen
   let replacePrev = false; // the next "You: ..." line replaces the previous one (its turn was dropped and merged)
   async function post(body, onEvent, myTurn) {
@@ -143,13 +145,25 @@ export function createVoiceChat(o) {
           const blob = b64ToBlob(ev.audio, "audio/wav");
           chain = chain.then(async () => {
             if (stopped || myTurn !== turnSeq) return null; // you cut this reply off: nothing more of it is played
-            voiceOut = true;
-            try {
-              // the words appear when the voice really starts (the page tells us), not when they were written
-              return await o.playClip(blob, ev.video_url || "", (secs) => o.onSpeak?.(ev.text, secs));
-            } finally {
+            let voiceTimer = 0;
+            const voiceDone = () => {
+              clearTimeout(voiceTimer);
+              if (!voiceOut) return;
               voiceOut = false;
-              voiceOutUntil = performance.now() + 1500; // its own voice fades out of the room
+              lastState = "";
+              voiceOutUntil = performance.now() + 900; // its own voice fades out of the room
+            };
+            try {
+              // "Speaking" (and the deaf microphone) lasts only while its voice is really playing: from the moment it starts until the voice
+              // ends (the picture may run on a little longer while the head settles). The words appear when it starts.
+              return await o.playClip(blob, ev.video_url || "", (secs) => {
+                voiceOut = true;
+                lastState = "";
+                o.onSpeak?.(ev.text, secs);
+                if (Number.isFinite(secs) && secs > 0) voiceTimer = setTimeout(voiceDone, secs * 1000 + 150);
+              });
+            } finally {
+              voiceDone();
             }
           });
         } else {
@@ -160,12 +174,19 @@ export function createVoiceChat(o) {
     await chain;
   }
 
-  async function runTurn(body) {
+  let currentTurn = Promise.resolve();
+  function runTurn(body, retried = false) {
+    currentTurn = runTurnInner(body, retried);
+    return currentTurn;
+  }
+  async function runTurnInner(body, retried = false) {
     let engaged = Boolean(body.text); // something typed counts; heard speech counts once it has been accepted (see below)
     if (engaged) nudges = 0;
     busy = true;
     replyStarted = false;
     turnNudge = Boolean(body.nudge);
+    turnText = body.text || "";
+    turnGreeting = body.nudge === 9; // the introduction: nothing you do may cut it off
     heardShown = false;
     turnCtl = new AbortController();
     const myTurn = ++turnSeq;
@@ -211,8 +232,16 @@ export function createVoiceChat(o) {
       o.onSuperseded?.();
       return;
     }
-    if (failed) o.onStatus(`Problem: ${failed}`);
-    resumeAt = performance.now() + 600; // let the room go quiet before listening again
+    if (turnGreeting && !replyStarted && !retried && !stopped) {
+      busy = false;
+      return runTurnInner(body, true); // the introduction did not come out: try once more, it must be the first thing it does
+    }
+    if (failed) {
+      o.onStatus(`Problem: ${failed}`);
+      noticeUntil = performance.now() + 5000; // keep the message on screen instead of replacing it at once with "Your turn"
+      noticePending = true;
+    }
+    resumeAt = performance.now() + 400; // let the room go quiet before listening again
     busy = false;
     if (engaged || body.nudge) lastActive = performance.now(); // room noise that was ignored does not restart the silence clock
     if (pending.length && !failed && !stopped && !muted) {
@@ -254,13 +283,23 @@ export function createVoiceChat(o) {
   }
 
   function sendHeard(got) {
+    if (mergeText) {
+      const typed = mergeText;
+      mergeText = null;
+      if (!got.length) {
+        void runTurn({ text: typed }); // that was only a click or cough: answer what was typed
+        return;
+      }
+      turnAudio = got;
+      blobToBase64(encodeWav16k(got, ctx.sampleRate)).then((b64) => runTurn({ audio_base64: b64, prefix: typed }));
+      return;
+    }
     if (mergePrev) {
       const secs = [...mergePrev, ...got].reduce((n, c) => n + c.length, 0) / ctx.sampleRate;
       if (secs < 24) got = [...mergePrev, ...got]; // two parts of one question, as long as the whole fits what the ears can take
       mergePrev = null;
     }
     turnAudio = got;
-    sentAt = performance.now();
     const wav = encodeWav16k(got, ctx.sampleRate);
     blobToBase64(wav).then((b64) => runTurn({ audio_base64: b64 }));
   }
@@ -268,13 +307,15 @@ export function createVoiceChat(o) {
   // While the avatar is talking or playing a clip the mic records nothing and typing is blocked; while it thinks, the mic listens.
   let lastState = "";
   function reportState() {
-    const ownVoice = voiceOut || performance.now() < voiceOutUntil;
-    const wait = busy || ownVoice;
-    const st = wait ? "wait" : muted ? "muted" : performance.now() < resumeAt ? "wait" : "listen";
+    const now = performance.now();
+    // "Speaking" only while its clip is really playing (the page writes that line itself, with the model's name, when the voice starts).
+    // thinking: it is making the reply or waiting for the next part. listening: it has nothing to say. In both you can talk.
+    const st = voiceOut ? "speak" : busy ? "think" : muted ? "muted" : "listen";
     if (st === lastState) return;
     lastState = st;
-    o.onState?.({ listening: st === "listen", canType: !wait && st !== "wait" });
-    if (st === "listen" && performance.now() >= noticeUntil) o.onStatus("🎤 Your turn — I'm listening");
+    o.onState?.({ listening: st === "listen" || st === "think", canType: st !== "speak" });
+    if (st === "think") o.onStatus("Thinking…");
+    else if (st === "listen" && now >= noticeUntil) o.onStatus("🎤 Your turn — I'm listening");
   }
 
   /** Tell the server to stop making the rest of the reply right now (it cannot rely on noticing the closed connection while it is busy). */
@@ -304,7 +345,7 @@ export function createVoiceChat(o) {
     const now = performance.now();
     const ownVoice = voiceOut || now < voiceOutUntil;
     const threshold = Math.max(0.01, floor * 3.2);
-    const ignoring = muted || ownVoice || (busy && replyStarted) || (!busy && now < resumeAt); // the microphone is not being listened to right now
+    const ignoring = muted || ownVoice || (!busy && now < resumeAt); // the microphone is not being listened to right now
     o.onLevel(ignoring ? 0 : rms, threshold); // so the level bar stays flat
     reportState();
     if (noticePending && now >= noticeUntil) {
@@ -316,22 +357,40 @@ export function createVoiceChat(o) {
       partialGen++;
       o.onPartial?.("");
       chunks = [];
-      preroll = []; // nothing from while it was muted or talking (its own voice) may leak into the next recording
       loud = 0;
+      // Only the short settling time after its own voice (or after a reply) is "ignored": keep the last second of sound, so if you started
+      // talking during it, the first words are still in the recording when listening resumes. While it really talks or you are muted,
+      // nothing is kept (its own voice must never leak into your recording).
+      const settling = !muted && !voiceOut;
+      if (settling) {
+        preroll.push(new Float32Array(x));
+        if (preroll.length > 24) preroll.shift();
+      } else {
+        preroll = [];
+      }
       return;
     }
     if (!speaking) {
       if (rms < threshold) floor = floor * 0.97 + rms * 0.03; // learn the room only while it is quiet
       preroll.push(new Float32Array(x));
-      if (preroll.length > 16) preroll.shift(); // ~0.7 s kept from before the trigger so the start of a sentence is not clipped
+      if (preroll.length > 24) preroll.shift(); // ~1 s kept from before the trigger so the start of a sentence is not clipped
       loud = rms > threshold ? loud + 1 : 0;
       if (rms > threshold) lastLoudAt = performance.now();
       if (loud >= 2) {
-        if (busy && (turnAudio || turnNudge) && !replyStarted && (turnNudge || now - sentAt < MERGE_WINDOW_MS)) {
+        if (busy && !turnGreeting && replyStarted) {
+          // It is between two sentences of its reply (or waiting to begin the next): talking now stops the rest of the reply, and you are
+          // answered next. (While its voice is actually playing the microphone is deaf, so this only happens in the gaps.)
+          if (loud < 4) return; // a click or a bump is not you
+          turnSeq++; // sentences already on their way are never played
+          o.onBargeIn?.();
+          cancelServerReply();
+          turnCtl?.abort();
+        } else if (busy && !turnGreeting && (turnAudio || turnNudge || turnText) && !replyStarted) {
           if (loud < 4) return; // a click or a bump is not you
           // still thinking, nothing said yet: drop that reply. If it was an answer to you, both parts go together; if it was something it
           // started by itself (a greeting, speaking up), you are simply answered now instead of after all of it
           if (turnAudio) mergePrev = turnAudio;
+          else if (turnText) mergeText = turnText;
           cancelServerReply();
           turnCtl?.abort();
         }
@@ -351,7 +410,7 @@ export function createVoiceChat(o) {
       chunks = [];
       preroll = [];
       loud = 0;
-      if (mergePrev) sendHeard([]);
+      if (mergePrev || mergeText) sendHeard([]);
       return;
     }
     // Show what it hears only when the sound is clearly louder than the room (your voice close to the microphone), so background
@@ -369,7 +428,7 @@ export function createVoiceChat(o) {
       chunks = [];
       preroll = [];
       loud = 0;
-      if (mergePrev) sendHeard([]);
+      if (mergePrev || mergeText) sendHeard([]);
       return;
     }
     // The end of what you said: a short remark ends after a short pause (so it is answered while it is still a short sentence), a long
@@ -387,15 +446,15 @@ export function createVoiceChat(o) {
       preroll = [];
       loud = 0;
       if (speechMs - quietMs < 350) {
-        if (mergePrev) {
+        if (mergePrev || mergeText) {
           sendHeard([]); // that was only a click or cough: answer the part that was dropped
           return;
         }
         if (!busy) o.onStatus("Listening… just talk.");
         return; // a click or cough
       }
-      if (busy) {
-        pending.push(...got); // keep it; answered right after the current reply
+      if (busy || introPending) {
+        pending.push(...got); // keep it; answered right after the current reply (or the introduction)
         return;
       }
       sendHeard(got);
@@ -422,14 +481,35 @@ export function createVoiceChat(o) {
       nudgeTimer = setInterval(maybeNudge, 1000);
     },
     /** Open the conversation: the model writes a proper hello for this person and this moment. */
-    greet: () => runTurn({ nudge: 9 }),
+    greet: async () => {
+      try {
+        await runTurn({ nudge: 9 });
+      } finally {
+        introPending = false;
+        // what you said while it was still getting ready is answered now (when the greeting turn ended it was held back for this)
+        if (pending.length && !busy && !stopped && !muted) {
+          const got = pending;
+          pending = [];
+          sendHeard(got);
+        }
+      }
+    },
     /** Restart the silence clock (after the greeting). */
     touch() {
       lastActive = performance.now();
       nudges = 0;
     },
-    sendText: (text) => {
-      if (busy || voiceOut || performance.now() < voiceOutUntil) return; // wait for your turn
+    sendText: async (text) => {
+      if (introPending) return; // the introduction comes first
+      if (voiceOut || performance.now() < voiceOutUntil || turnGreeting && busy) return; // its voice is playing: wait for your turn
+      if (busy) {
+        // it is thinking, or between two sentences: drop the rest of its reply and answer this now
+        turnSeq++;
+        o.onBargeIn?.();
+        cancelServerReply();
+        turnCtl?.abort();
+        await currentTurn;
+      }
       return runTurn({ text });
     },
     setMuted(m) {

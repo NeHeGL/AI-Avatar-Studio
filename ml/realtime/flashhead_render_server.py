@@ -46,7 +46,8 @@ W2V = str(FH / "models" / "wav2vec2-base-960h")
 SEED = 42
 LEAN = os.environ.get("AVATAR_LEAN") == "1"  # set by start_all on the small (16 GB) tier only
 TAIL_S = 0.6        # silence added after the speech, so the head settles before the clip ends
-EASE_FRAMES = 10    # the last 0.4 s blend onto the rest frame
+EASE_FRAMES = 16    # the last 0.64 s blend onto the rest frame (a shorter blend reads as a snap from the talking pose to the waiting animation)
+EASE_IN_FRAMES = 14  # the first 0.56 s blend from the rest frame into the talking
 TMP = ROOT / "data" / "tmp_render"
 
 print("loading FlashHead-Lite...", flush=True)
@@ -150,7 +151,7 @@ def render_reply(wav_bytes: bytes, source: Path, out_mp4: Path) -> float:
         frames = _frames_for(str(wav), prep["crop_png"], tail_s=TAIL_S)
         rest = np.array(Image.open(prep["crop_png"].parent / "talk_rest.jpg").convert("RGB")).astype(np.float32)
         # start exactly on the rest frame and land exactly back on it, so a reply can follow any other clip without a visible join
-        frames = _ease(frames, rest, n_in=6, n_out=min(EASE_FRAMES, len(frames)))
+        frames = _ease(frames, rest, n_in=EASE_IN_FRAMES, n_out=min(EASE_FRAMES, len(frames)))
         proc = subprocess.Popen(
             ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "512x512", "-r", "25", "-i", "-",
              "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "17", "-bf", "0", str(silent)],
@@ -161,7 +162,7 @@ def render_reply(wav_bytes: bytes, source: Path, out_mp4: Path) -> float:
         proc.stdin.close()
         proc.wait()
         out_mp4.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(silent), "-i", str(wav), "-c:v", "copy", "-af", f"apad=pad_dur={TAIL_S + 0.2}", "-c:a", "aac", "-shortest", str(out_mp4)], check=True)
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(silent), "-i", str(wav), "-c:v", "copy", "-af", "apad", "-c:a", "aac", "-shortest", str(out_mp4)], check=True)
     finally:
         for p in (wav, silent):
             p.unlink(missing_ok=True)
@@ -174,17 +175,44 @@ BANK_SECONDS = float(os.environ.get("FLASHHEAD_BANK_SECONDS", "6"))
 _bank = {"running": False, "done": 0, "total": 0}
 
 
+def _align_to(frame: np.ndarray, rest: np.ndarray, small: int = 128):
+    """The affine move (2x3, full-size pixels) that puts `frame` on top of `rest` (head position, tilt and size), or None when it cannot be found."""
+    try:
+        k = small / frame.shape[0]
+        g = lambda im: cv2.GaussianBlur(cv2.cvtColor(cv2.resize(im.astype(np.uint8), (small, small), interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2GRAY), (5, 5), 0)  # noqa: E731
+        M = np.eye(2, 3, dtype=np.float32)
+        cv2.findTransformECC(g(rest), g(frame), M, cv2.MOTION_AFFINE, (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 60, 1e-5), None, 5)
+        M[:, 2] /= k
+        return M
+    except Exception:
+        return None
+
+
 def _ease(frames, rest, n_in=8, n_out=10):
-    """Start exactly on the rest frame and land exactly back on it, so any clip can follow any other without a visible join."""
-    sm = lambda t: t * t * (3 - 2 * t)  # noqa: E731
+    """Start exactly on the rest frame and land exactly back on it, so any clip can follow any other without a visible join.
+
+    A plain cross-fade between two different head positions shows two faces at once (double eyes, a smeared nose). So each frame in a blend is
+    first moved toward the rest position (by the part of the blend that is still 'rest'), and only then faded: the head glides back to where
+    the waiting animation will take over, instead of ghosting there."""
+    sm = lambda t: t * t * t * (t * (6 * t - 15) + 10)  # noqa: E731  (smootherstep: no sudden start or stop)
     out = [f.astype(np.float32) for f in frames]
+    I = np.eye(2, 3, dtype=np.float32)
+
+    def blend(k, w):  # w = how much of the real frame is shown (1 = all of it, 0 = the rest frame)
+        f = frames[k]
+        M = _align_to(f, rest) if w < 0.98 else None
+        if M is not None:
+            a = 1.0 - w
+            f = cv2.warpAffine(f.astype(np.float32), I * (1 - a) + M * a, (f.shape[1], f.shape[0]), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE)
+        else:
+            f = f.astype(np.float32)
+        return (1 - w) * rest + w * f
+
     for j in range(min(n_in, len(out))):
-        w = sm((j + 1) / n_in)
-        out[j] = (1 - w) * rest + w * out[j]
+        out[j] = blend(j, sm((j + 1) / n_in))
     for j in range(min(n_out, len(out))):
-        w = sm((j + 1) / n_out)
         k = len(out) - n_out + j
-        out[k] = (1 - w) * out[k] + w * rest
+        out[k] = blend(k, 1 - sm((j + 1) / n_out))
     return [np.clip(f, 0, 255).astype(np.uint8) for f in out]
 
 

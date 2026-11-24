@@ -100,6 +100,9 @@ def extract(ask, display: str, facts: str, learned: list[str], dialogue: list[tu
         f"WHAT IT HAS ALREADY NOTED:\n{chr(10).join('- ' + l for l in learned[-40:]) or '(nothing yet)'}\n\n"
         f"THE CONVERSATION:\n{convo}\n\n"
         "RULES:\n"
+        f"- When the person talks TO the avatar about itself (\"You're a singer.\", \"You won a rap battle when you were young.\", \"You have a dog\"), "
+        f"that IS a fact about {display}: note it as \"{display} is a singer.\" / \"{display} won a rap battle when young.\" Do not skip it because it says "
+        "\"you\", and do not wait for the avatar to agree: how the avatar reacted (surprise, doubt, \"oh cool\") is not evidence either way.\n"
         "- Note only facts the PERSON stated. The avatar's own words are only there so you can understand a short answer such as \"yes\" or \"June fifth\".\n"
         "- Lasting facts only: a name, a birthday, family, friends, pets, a job, where they live, history, things they like or dislike, habits, "
         "beliefs. Not moods, plans for today, small talk or questions.\n"
@@ -129,3 +132,21 @@ def parse(raw: str) -> list[str]:
         if 6 <= len(s) <= MAX_LINE_CHARS:
             out.append(s)
     return out[:MAX_NEW_PER_TURN]
+
+
+def curious(ask, display: str, new_facts: list[str], learned: list[str]) -> list[str]:
+    """Follow-up questions the avatar would naturally wonder about after learning `new_facts`: what the new fact implies but does not say
+    (a singer: what kind of music? a dog: its name? a trip: where?). Each is one short question spoken by the avatar to the person."""
+    if not new_facts:
+        return []
+    prompt = (
+        f"The avatar plays {display}. It has just learned:\n" + "\n".join("- " + f for f in new_facts) + "\n\n"
+        f"WHAT IT ALREADY KNOWS:\n{chr(10).join('- ' + l for l in learned[-30:]) or '(nothing else)'}\n\n"
+        "Think about what is NOT yet known but follows naturally from the new thing, the way a curious friend would wonder. "
+        "Write up to 2 short questions the avatar could ask the person to find out more. Each is one plain sentence, spoken by the avatar in the "
+        "first person to the person (\"What kind of music do you sing?\", \"What is your dog called?\"). If the new fact is about the avatar itself "
+        f"(about {display}), the avatar can play along and ask the person what they imagine (\"So what kind of songs do I sing?\"). "
+        "Never ask for something already known above. Answer with ONLY a JSON list of strings, [] if nothing is worth asking."
+    )
+    out = parse(ask(_SYSTEM, prompt))
+    return [q for q in out if q.endswith("?")][:2]

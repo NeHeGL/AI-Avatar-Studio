@@ -30,10 +30,6 @@ if defined NEED (
 echo Closing any old AI Avatar Studio servers first...
 powershell -NoProfile -Command "foreach($p in 8765,8770,8771,8772){Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}"
 timeout /t 2 /nobreak >nul
-echo Starting AI Avatar Studio (chat brain and video renderer start in the background)...
-"ml\.venv\Scripts\python.exe" start_all.py
-if errorlevel 1 (
-    echo.
-    echo  AI Avatar Studio stopped with an error. See the messages above.
-    pause
-)
+echo Starting AI Avatar Studio (it opens in a moment)...
+rem The server runs hidden (no console window); its log is data\_server.log. Use "Stop AI Avatar Studio.bat" to close it.
+powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -FilePath 'ml\.venv\Scripts\python.exe' -ArgumentList 'start_all.py' -WindowStyle Hidden -RedirectStandardOutput 'data\_server.log' -RedirectStandardError 'data\_server.err'"

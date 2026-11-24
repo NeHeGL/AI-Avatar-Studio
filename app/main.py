@@ -333,6 +333,7 @@ class ChatTurnBody(BaseModel):
     text: str | None = None
     token: str | None = None
     nudge: int | None = None  # 1..4: the model speaks up because the room went quiet
+    prefix: str | None = None  # typed words that this recording continues (you typed, then started talking before the answer)
 
 
 class PrepareBody(BaseModel):
@@ -422,7 +423,7 @@ async def api_chat_turn(body: ChatTurnBody, request: Request) -> StreamingRespon
     from starlette.concurrency import iterate_in_threadpool
 
     cancel = threading.Event()
-    gen = chat.turn_stream(body.canonical_name, body.audio_base64, body.text, body.token, body.nudge, cancel)
+    gen = chat.turn_stream(body.canonical_name, body.audio_base64, body.text, body.token, body.nudge, cancel, body.prefix)
 
     async def stream():
         async def watch() -> None:

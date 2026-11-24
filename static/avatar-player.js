@@ -1,5 +1,5 @@
-import { createVoiceChat } from "/static/voice-chat.js?v=41";
-import { loadAvatarFace } from "/static/avatar-face.js?v=42";
+import { createVoiceChat } from "/static/voice-chat.js?v=49";
+import { loadAvatarFace } from "/static/avatar-face.js?v=43";
 
 /**
  * The chat avatar: the person's photo with its waiting animations and lip-sync reply videos, plus the voice chat.
@@ -76,12 +76,17 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
   });
 
   /** Play one spoken sentence: a video of the person saying it when there is one, otherwise just the voice. */
+  let clipGen = 0; // bumped when you talk over the reply: sentences still waiting their turn are dropped
   async function playClip(blob, videoUrl = "", onSpeak = null) {
     if (destroyed) return;
+    const gen = clipGen;
     await avatarFace?.whenIdle();
+    if (gen !== clipGen) return;
     if (avatarFace && videoUrl) {
-      statusEl.textContent = "Speaking…" + chatVoiceFoot;
-      const played = await avatarFace.playReply(videoUrl, blob, (secs) => onSpeak?.(secs));
+      const played = await avatarFace.playReply(videoUrl, blob, (secs) => {
+        statusEl.textContent = "Speaking…" + chatVoiceFoot; // only now: its voice has really started
+        onSpeak?.(secs);
+      });
       // a reply video is single-use: once it has played, the server throws it away
       setTimeout(() => {
         fetch("/api/chat/reply-played", {
@@ -94,8 +99,10 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
     }
     avatarFace?.release(); // no video for this sentence: the voice plays over the still picture
     audio.src = URL.createObjectURL(blob);
-    statusEl.textContent = "Speaking…" + chatVoiceFoot;
-    audio.addEventListener("playing", () => onSpeak?.(audio.duration), { once: true });
+    audio.addEventListener("playing", () => {
+      statusEl.textContent = "Speaking…" + chatVoiceFoot;
+      onSpeak?.(audio.duration);
+    }, { once: true });
     await new Promise((resolve) => {
       const done = () => {
         audio.removeEventListener("ended", done);
@@ -204,6 +211,10 @@ export function mountAvatarPlayer(stageEl, profile, hooks = {}) {
         onLevel: (v, thr) => {
           meterBar.style.width = `${Math.min(100, v * 600)}%`;
           meterThr.style.left = `${Math.min(100, thr * 600)}%`;
+        },
+        onBargeIn: () => {
+          clipGen++;
+          avatarFace?.cancelPending();
         },
         onLine: (who, text, replace) => addLine(who, text, replace),
         onSpeak: (text, secs) => addLine("avatar", text, false, secs),
